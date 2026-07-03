@@ -383,19 +383,14 @@ function getFilesApiUrl() {
 }
 
 export function uploadFile(file, metadata, thumbnail = null, options = {}) {
-  return uploadViaWorker(file, metadata, thumbnail, options);
+  return uploadToMega(file, metadata, thumbnail, options);
 }
 
-function uploadViaWorker(file, metadata, thumbnail = null, options = {}) {
+function uploadToMega(file, metadata, thumbnail = null, options = {}) {
   const { onProgress, signal } = options;
-  const workerUrl = getFilesApiUrl();
+  const endpoint = `${getFunctionsUrl()}/mega-upload`;
 
   return new Promise(async (resolve, reject) => {
-    if (!workerUrl) {
-      reject(new Error("File server isn't configured yet. Set filesApiUrl in config.js."));
-      return;
-    }
-
     const token = await getAccessToken();
     if (!token) {
       reject(new Error("You're not signed in. Log in and try again."));
@@ -406,16 +401,13 @@ function uploadViaWorker(file, metadata, thumbnail = null, options = {}) {
     formData.append('title', metadata.title);
     formData.append('description', metadata.description || '');
     formData.append('tags', JSON.stringify(metadata.tags || []));
-    formData.append('size_bytes', String(file.size));
-    formData.append('mime_type', file.type || 'application/octet-stream');
     formData.append('file', file);
     if (thumbnail?.size) {
       formData.append('thumbnail', thumbnail);
-      formData.append('thumbnail_type', thumbnail.type || 'image/jpeg');
     }
 
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${workerUrl}/upload`);
+    xhr.open('POST', endpoint);
     xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     xhr.responseType = 'text';
 
