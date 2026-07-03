@@ -14,8 +14,8 @@
     <p class="loading">Loading...</p>
   </main>
   <script type="module">
-    import { initPage, renderFileGrid, escapeHtml, formatDate, showToast, pageUrl } from './js/ui.js';
-    import { getCollection, getCollectionFiles, addToCollection, deleteCollection } from './js/api.js';
+    import { initPage, renderFileGrid, escapeHtml, formatDate, formatBytes, showToast, pageUrl } from './js/ui.js';
+    import { getCollection, getCollectionFiles, getUserFiles, addToCollection, deleteCollection } from './js/api.js';
     import { getUser, isModerator } from './js/auth.js';
 
     const main = document.getElementById('main-content');
@@ -50,25 +50,23 @@
             ${isOwner ? `
               <div class="sidebar-card" style="margin-bottom:2rem">
                 <h2>Add File to Collection</h2>
-                <form id="add-file-form" class="search-bar">
-                  <input type="text" id="file-id" placeholder="Paste file UUID" required>
-                  <button type="submit" class="btn btn-primary">Add</button>
-                </form>
+                <p class="settings-hint" style="margin-bottom:0.75rem">Search your uploads and add them to this collection.</p>
+                <div class="file-picker">
+                  <input type="search" id="upload-search" class="file-picker-search" placeholder="Search by title, filename, or tag…" autocomplete="off">
+                  <div id="upload-picker-list" class="file-picker-list"></div>
+                  <p id="upload-picker-empty" class="empty-state" hidden>No matching uploads.</p>
+                </div>
               </div>
             ` : ''}
             <div id="file-grid" class="file-grid"></div>
           `;
 
-          await renderFileGrid(files, document.getElementById('file-grid'));
+          const grid = document.getElementById('file-grid');
+          await renderFileGrid(files, grid);
 
           if (isOwner) {
-            document.getElementById('add-file-form').addEventListener('submit', async (e) => {
-              e.preventDefault();
-              const fileId = document.getElementById('file-id').value.trim();
-              await addToCollection(collectionId, fileId);
-              showToast('File added to collection', 'success');
-              window.location.reload();
-            });
+            const myUploads = await getUserFiles(user.id, true);
+            setupUploadPicker(collectionId, myUploads, files, grid);
           }
 
           document.getElementById('delete-collection-btn')?.addEventListener('click', async () => {
@@ -85,6 +83,72 @@
           main.innerHTML = `<p class="error-state">${escapeHtml(err.message)}</p>`;
         }
       });
+    }
+
+    function setupUploadPicker(collectionId, uploads, inCollection, grid) {
+      const search = document.getElementById('upload-search');
+      const list = document.getElementById('upload-picker-list');
+      const empty = document.getElementById('upload-picker-empty');
+      const inSet = new Set(inCollection.map((f) => f.id));
+      let available = uploads.filter((f) => !inSet.has(f.id));
+
+      const render = (query = '') => {
+        const q = query.trim().toLowerCase();
+        const matches = available.filter((f) => {
+          if (!q) return true;
+          const haystack = `${f.title} ${f.filename} ${(f.tags || []).join(' ')}`.toLowerCase();
+          return haystack.includes(q);
+        });
+
+        if (!available.length) {
+          list.innerHTML = '';
+          empty.textContent = 'All your uploads are already in this collection.';
+          empty.hidden = false;
+          return;
+        }
+
+        if (!matches.length) {
+          list.innerHTML = '';
+          empty.textContent = 'No matching uploads.';
+          empty.hidden = false;
+          return;
+        }
+
+        empty.hidden = true;
+        list.innerHTML = matches.map((f) => `
+          <div class="file-picker-item">
+            <div class="file-picker-info">
+              <strong>${escapeHtml(f.title)}</strong>
+              <span class="file-picker-meta">
+                ${escapeHtml(f.filename)} · ${formatBytes(f.size_bytes)}
+                ${f.status !== 'approved' ? ` · <span class="status-badge status-${f.status}">${f.status}</span>` : ''}
+              </span>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm add-to-col-btn" data-id="${f.id}">Add</button>
+          </div>
+        `).join('');
+
+        list.querySelectorAll('.add-to-col-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            try {
+              await addToCollection(collectionId, btn.dataset.id);
+              showToast('File added to collection', 'success');
+              available = available.filter((f) => f.id !== btn.dataset.id);
+              inSet.add(btn.dataset.id);
+              const updated = await getCollectionFiles(collectionId);
+              await renderFileGrid(updated, grid);
+              render(search.value);
+            } catch (err) {
+              showToast(err.message || 'Could not add file', 'error');
+              btn.disabled = false;
+            }
+          });
+        });
+      };
+
+      search.addEventListener('input', () => render(search.value));
+      render();
     }
   </script>
 </body>
