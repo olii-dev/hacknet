@@ -35,12 +35,15 @@ Move `filesApiUrl` out of `config.js` and into a Supabase table (e.g. `app_confi
 **Option C — Auto-push script** *(free, hackier)*
 Same idea as B, but instead of Supabase, the Ubuntu side commits and pushes `config.js` to GitHub via `gh` whenever the URL rotates. Needs a deploy key or PAT on Ubuntu. GitHub Pages rebuild adds ~60s of downtime per rotation. Worse than B but simpler.
 
+**Anything else** *(genuinely, i'll take any other option)*
+If you have a better idea (i hope you do) on how to fix it, just do that and I'll test it out!
+
 ### Want to take it on?
 
 1. Fork the repo
 2. Pick a fix (A, B, C, or pitch your own)
 3. Open a PR against `main`
-4. DM [@olii-dev](https://github.com/olii-dev) if you need Supabase project access, a Cloudflare account, SSH to the Ubuntu box, or anything else to test
+4. DM [@olii-dev](https://github.com/olii-dev) on Slack (hc only) if you need Supabase project access, a Cloudflare account, SSH to the Ubuntu box, or anything else to test
 
 ### Local dev (frontend only)
 
