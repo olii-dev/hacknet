@@ -283,13 +283,19 @@ export async function uploadCoverImage(fileId, thumbnail) {
   const token = await getAccessToken();
   if (!token) throw new Error("You're not signed in. Log in and try again.");
 
-  const api = getFilesApiUrl();
-  if (!api) throw new Error("File server isn't configured.");
-
   const formData = new FormData();
   formData.append('thumbnail', thumbnail);
 
-  const res = await fetch(`${api}/files/${fileId}/cover`, {
+  const api = getFilesApiUrl();
+  const endpoint = api
+    ? `${api}/files/${fileId}/cover`
+    : `${getFunctionsUrl()}/mega-cover`;
+
+  if (!api) {
+    formData.append('file_id', fileId);
+  }
+
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
@@ -343,7 +349,7 @@ export function formatUploadError(err, fallback = 'Upload failed. Please try aga
     [/cancel/i, 'Upload cancelled.'],
     [/not authenticated|missing authorization|unauthorized/i, "You're not signed in. Log in and try again."],
     [/file and title are required/i, 'Please select a file and give it a title.'],
-    [/file exceeds .*gb limit/i, 'That file is too big. Hacknet allows uploads up to 1 GB.'],
+    [/file exceeds .*limit|too big/i, 'That file is too big. Hacknet allows uploads up to 50 MB.'],
     [/exceeded the maximum allowed size|payload too large|entity too large/i, 'That file is too large for the upload server to accept.'],
     [/file type not allowed/i, "That file type isn't supported. Try images, PDFs, zip, audio, video, or plain text."],
     [/cover image exceeds/i, 'Your cover image is too large. Keep it under 5 MB.'],

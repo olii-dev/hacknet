@@ -7,7 +7,7 @@ window.HACKNET_CONFIG = {
   // through the mega-upload / mega-preview Edge Functions (see docs/js/api.js).
   filesApiUrl: '',
   uploadWorkerUrl: '',
-  maxUploadBytes: 1024 * 1024 * 1024, // 1 GB
+  maxUploadBytes: 50 * 1024 * 1024, // 50 MB
   maxThumbnailBytes: 5 * 1024 * 1024, // 5 MB
   megaQuotaPerAccount: 20 * 1024 * 1024 * 1024, // ~20 GB per Mega account
   autoApprove: false,

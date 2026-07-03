@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const MAX_BYTES = 1024 * 1024 * 1024;
+const MAX_BYTES = 50 * 1024 * 1024;
 const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
 const MEGA_QUOTA_PER_ACCOUNT = 20 * 1024 * 1024 * 1024; // ~20 GB free tier each
 const THUMBNAIL_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Please select a file and give it a title.' }, 400);
     }
     if (file.size > MAX_BYTES) {
-      return json({ error: 'That file is too big. Hacknet allows uploads up to 1 GB.' }, 400);
+      return json({ error: 'That file is too big. Hacknet allows uploads up to 50 MB.' }, 400);
     }
     if (!ALLOWED_TYPES.includes(file.type) && file.type !== '') {
       return json({ error: `That file type isn't supported (${file.type || 'unknown'}).` }, 400);

@@ -12,7 +12,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const MAX_BYTES = 1024 * 1024 * 1024;
+const MAX_BYTES = 50 * 1024 * 1024;
 const MEGA_QUOTA_PER_ACCOUNT = 20 * 1024 * 1024 * 1024;
 const SESSION_TTL_MS = 15 * 60 * 1000;
 
@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Please add a title and select a file.' }, 400);
     }
     if (sizeBytes > MAX_BYTES) {
-      return json({ error: 'That file is too big. Hacknet allows uploads up to 1 GB.' }, 400);
+      return json({ error: 'That file is too big. Hacknet allows uploads up to 50 MB.' }, 400);
     }
     if (containsProfanity(title, String(body.description || ''), ...(Array.isArray(body.tags) ? body.tags : []))) {
       return json({ error: 'Your upload contains language that isn\'t allowed on Hacknet.' }, 400);
