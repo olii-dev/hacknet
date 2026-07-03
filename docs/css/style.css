@@ -272,7 +272,8 @@ main {
   opacity: 0.35;
 }
 
-.file-card-img {
+.file-card-img,
+.file-card-thumb video.file-card-img {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -759,6 +760,34 @@ main {
 .status-pending { background: #ffd43b33; color: #ffd43b; }
 .status-approved { background: #51cf6633; color: #51cf66; }
 .status-rejected { background: #ff6b6b33; color: #ff6b6b; }
+
+.badge-creator {
+  display: inline-block;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(135deg, #6c8cff, #9b6cff);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+}
+
+.badge-creator.badge-sm {
+  font-size: 0.62rem;
+  padding: 0.1rem 0.4rem;
+  margin-left: 0.25rem;
+}
+
+.profile-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
 
 /* Settings */
 .settings-page {

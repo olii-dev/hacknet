@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Profile — Hacknet</title>
-  <link rel="stylesheet" href="css/style.css">
   <script src="js/config.js"></script>
   <script src="js/theme-init.js"></script>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header><nav id="site-nav"></nav></header>
@@ -14,7 +14,7 @@
     <p class="loading">Loading...</p>
   </main>
   <script type="module">
-    import { initPage, renderFileGrid, escapeHtml, formatDate, showToast, pageUrl } from './js/ui.js';
+    import { initPage, renderFileGrid, escapeHtml, formatDate, showToast, pageUrl, creatorBadge } from './js/ui.js';
     import { getProfile, getUserFiles, getUserCollections, createCollection } from './js/api.js';
     import { getUser, getProfile as getMyProfile, updateProfile } from './js/auth.js';
 
@@ -43,7 +43,7 @@
 
           main.innerHTML = `
             <div class="page-header">
-              <h1>@${escapeHtml(profile.username)}</h1>
+              <h1 class="profile-title">@${escapeHtml(profile.username)} ${creatorBadge(profile.username)}</h1>
               <p>${escapeHtml(profile.bio || 'No bio yet.')}</p>
               <p style="color:var(--text-muted);font-size:0.85rem">Joined ${formatDate(profile.created_at)}</p>
             </div>

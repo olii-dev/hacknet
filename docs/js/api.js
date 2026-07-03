@@ -349,19 +349,19 @@ export function formatUploadError(err, fallback = 'Upload failed. Please try aga
     [/cancel/i, 'Upload cancelled.'],
     [/not authenticated|missing authorization|unauthorized/i, "You're not signed in. Log in and try again."],
     [/file and title are required/i, 'Please select a file and give it a title.'],
-    [/file exceeds .*limit|too big/i, 'That file is too big. Hacknet allows uploads up to 50 MB.'],
-    [/exceeded the maximum allowed size|payload too large|entity too large/i, 'That file is too large for the upload server to accept.'],
+    [/file exceeds .*limit|too big/i, 'That file is too big. Hacknet allows uploads up to 15 MB.'],
+    [/exceeded the maximum allowed size|payload too large|entity too large/i, 'That file is too large. Hacknet allows uploads up to 15 MB.'],
     [/file type not allowed/i, "That file type isn't supported. Try images, PDFs, zip, audio, video, or plain text."],
-    [/cover image exceeds/i, 'Your cover image is too large. Keep it under 5 MB.'],
+    [/cover image exceeds/i, 'Your cover image is too large.'],
     [/cover image must be/i, 'Cover images must be JPEG, PNG, GIF, or WebP.'],
     [/out of storage space|storage account is full/i, 'Hacknet is out of storage space right now. Try again later or ask a moderator.'],
-    [/isn't configured yet/i, "Upload server isn't configured yet. Deploy the upload worker and set uploadWorkerUrl in config.js."],
+    [/isn't configured yet/i, "Upload server isn't configured yet."],
     [/isn't supported/i, "That file type isn't supported. Try images, PDFs, zip, audio, video, or plain text."],
     [/could not save its details/i, 'Your file uploaded but we could not save its details. Please try again.'],
     [/storage login failed/i, 'Storage login failed on the server. Ask a moderator to check the Mega account settings.'],
-    [/server stopped while saving|status.?546|worker limit|out of memory/i, 'The server could not finish saving your file. Try again in a minute or with a smaller file.'],
+    [/server stopped while saving|status.?546|worker.?resource|WORKER_RESOURCE|out of memory/i, 'That file is too large for our upload server. Hacknet allows uploads up to 15 MB — try a smaller file.'],
     [/timeout|timed out/i, 'The upload took too long and timed out. Try again on a faster connection or with a smaller file.'],
-    [/413|payload too large|request entity too large/i, 'The file is too large for the server to accept.'],
+    [/413|payload too large|request entity too large/i, 'That file is too large. Hacknet allows uploads up to 15 MB.'],
     [/502|503|504|gateway/i, 'The upload server is busy or unavailable. Wait a moment and try again.'],
     [/500|internal server/i, 'Something went wrong on our end. Your file may not have been saved — please try again.'],
   ];
@@ -388,11 +388,11 @@ function getFilesApiUrl() {
   return (config.filesApiUrl || config.uploadWorkerUrl || '').replace(/\/$/, '');
 }
 
-export function uploadFile(file, metadata, thumbnail = null, options = {}) {
-  return uploadToMega(file, metadata, thumbnail, options);
+export function uploadFile(file, metadata, options = {}) {
+  return uploadToMega(file, metadata, options);
 }
 
-function uploadToMega(file, metadata, thumbnail = null, options = {}) {
+function uploadToMega(file, metadata, options = {}) {
   const { onProgress, signal } = options;
   const endpoint = `${getFunctionsUrl()}/mega-upload`;
 
@@ -408,9 +408,6 @@ function uploadToMega(file, metadata, thumbnail = null, options = {}) {
     formData.append('description', metadata.description || '');
     formData.append('tags', JSON.stringify(metadata.tags || []));
     formData.append('file', file);
-    if (thumbnail?.size) {
-      formData.append('thumbnail', thumbnail);
-    }
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', endpoint);
@@ -461,7 +458,7 @@ function uploadToMega(file, metadata, thumbnail = null, options = {}) {
     xhr.upload.addEventListener('progress', (event) => {
       if (!onProgress) return;
       const loaded = event.loaded;
-      const total = event.lengthComputable ? event.total : file.size + (thumbnail?.size || 0);
+      const total = event.lengthComputable ? event.total : file.size;
       const bytesPerSecond = speedFromDelta(loaded);
       const fileShare = file.size / total;
       const fileLoaded = Math.min(file.size, Math.round(loaded * fileShare));
@@ -504,6 +501,11 @@ function uploadToMega(file, metadata, thumbnail = null, options = {}) {
         return;
       }
 
+      if (xhr.status === 546) {
+        fail('WORKER_RESOURCE_LIMIT');
+        return;
+      }
+
       const serverError = body.error || `Upload failed (${xhr.status || 'unknown'})`;
       fail(serverError);
     });
@@ -528,9 +530,12 @@ function uploadToMega(file, metadata, thumbnail = null, options = {}) {
 
 export function getDownloadUrl(fileId, filename = 'download', file = null) {
   const api = getFilesApiUrl();
-  if (api && (!file || file.storage_path)) {
+  if (api && file?.storage_path) {
     const params = new URLSearchParams({ download: '1' });
     return `${api}/files/${fileId}?${params}`;
+  }
+  if (!file?.mega_url && file?.storage_path) {
+    return '#';
   }
   const config = window.HACKNET_CONFIG;
   const params = new URLSearchParams({
@@ -543,10 +548,13 @@ export function getDownloadUrl(fileId, filename = 'download', file = null) {
 
 export function getPreviewUrl(fileId, extraParams = {}, file = null) {
   const api = getFilesApiUrl();
-  if (api && (!file || file.storage_path)) {
+  if (api && file?.storage_path) {
     const params = new URLSearchParams(extraParams);
     const qs = params.toString();
     return qs ? `${api}/files/${fileId}?${qs}` : `${api}/files/${fileId}`;
+  }
+  if (!file?.mega_url && file?.storage_path) {
+    return '';
   }
   const config = window.HACKNET_CONFIG;
   const params = new URLSearchParams({

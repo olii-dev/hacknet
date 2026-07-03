@@ -75,20 +75,26 @@ export async function signOut() {
   if (error) throw error;
 }
 
-export async function requireAuth(redirectTo = 'login.html') {
+function authPage(page) {
+  const base = window.HACKNET_CONFIG?.basePath || '/';
+  const normalized = base.endsWith('/') ? base : `${base}/`;
+  return `${normalized}${page}.html`;
+}
+
+export async function requireAuth(redirectTo = 'login') {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
     const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
-    window.location.href = `${redirectTo}?return=${returnUrl}`;
+    window.location.href = `${authPage(redirectTo)}?return=${returnUrl}`;
     return false;
   }
   return true;
 }
 
-export async function requireModerator(redirectTo = 'index.html') {
+export async function requireModerator(redirectTo = 'index') {
   if (!(await requireAuth())) return false;
   if (!isModerator()) {
-    window.location.href = redirectTo;
+    window.location.href = authPage(redirectTo);
     return false;
   }
   return true;

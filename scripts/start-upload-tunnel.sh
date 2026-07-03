@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-# FREE option — no Fly.io credit card.
-# Runs the upload worker on your Mac and exposes it via Cloudflare Tunnel.
-# Keep this terminal open while you (or others) upload files.
+# Runs the upload worker on THIS machine and exposes it via Cloudflare Tunnel.
+#
+# When to use this script:
+#   - Quick LOCAL test on your Mac. If /plex-usb isn't mounted here, it falls
+#     back to ./upload-worker/storage so the worker still starts.
+#
+# When NOT to use this:
+#   - In production. Your real worker lives on Ubuntu as systemd services
+#     (hacknet-upload + hacknet-upload-tunnel). See scripts/install-on-ubuntu.sh.
+#     If uploads 530, restart those services on Ubuntu — don't run this on the Mac.
+#
+# Keep this terminal open while uploading. Press Ctrl+C when done.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,8 +18,18 @@ WORKER="$ROOT/upload-worker"
 CONFIG="$ROOT/docs/js/config.js"
 PORT="${PORT:-8080}"
 
+# Initialise PIDs up front so the cleanup trap never trips `set -u`.
+WORKER_PID=""
+TUNNEL_PID=""
+
+cleanup() {
+  [[ -n "${WORKER_PID:-}" ]] && kill "$WORKER_PID" 2>/dev/null || true
+  [[ -n "${TUNNEL_PID:-}" ]] && kill "$TUNNEL_PID" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
 if [[ ! -f "$WORKER/.env" ]]; then
-  echo "Missing upload-worker/.env — copy .env.example and add Mega credentials first."
+  echo "Missing upload-worker/.env — copy .env.example first."
   exit 1
 fi
 
@@ -36,15 +55,20 @@ source .env
 set +a
 export PORT
 
-echo "Starting upload worker on port $PORT..."
+# .env ships STORAGE_ROOT=/plex-usb/hacknet (the Ubuntu mount). On a machine
+# without that mount (e.g. your Mac), fall back to a local dir so the worker
+# can still start for testing. Ubuntu is unaffected.
+STORAGE_ROOT="${STORAGE_ROOT:-/plex-usb/hacknet}"
+if [[ ! -d "$(dirname "$STORAGE_ROOT")" ]]; then
+  STORAGE_ROOT="$WORKER/storage"
+  echo "Note: /plex-usb not found on this machine — using local storage at $STORAGE_ROOT"
+fi
+mkdir -p "$STORAGE_ROOT/files" "$STORAGE_ROOT/thumbs"
+export STORAGE_ROOT
+
+echo "Starting upload worker on port $PORT (storage: $STORAGE_ROOT)..."
 node src/server.mjs &
 WORKER_PID=$!
-
-cleanup() {
-  kill "$WORKER_PID" 2>/dev/null || true
-  kill "$TUNNEL_PID" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
 
 sleep 1
 if ! kill -0 "$WORKER_PID" 2>/dev/null; then
@@ -73,6 +97,11 @@ if [[ -z "$PUBLIC_URL" ]]; then
   exit 1
 fi
 
+# Update BOTH URL fields — the client prefers filesApiUrl, so updating only
+# uploadWorkerUrl (the old behaviour) left uploads pointing at the stale URL.
+if [[ -f "$CONFIG" ]] && grep -q "filesApiUrl:" "$CONFIG"; then
+  perl -i -pe "s|filesApiUrl: '[^']*'|filesApiUrl: '$PUBLIC_URL'|" "$CONFIG"
+fi
 if [[ -f "$CONFIG" ]] && grep -q "uploadWorkerUrl:" "$CONFIG"; then
   perl -i -pe "s|uploadWorkerUrl: '[^']*'|uploadWorkerUrl: '$PUBLIC_URL'|" "$CONFIG"
 fi
@@ -83,6 +112,7 @@ echo "=============================================="
 echo ""
 echo "  Public URL:  $PUBLIC_URL"
 echo "  Health:      $PUBLIC_URL/health"
+echo "  Local:       http://127.0.0.1:$PORT/health"
 echo ""
 echo "  config.js updated with that URL."
 echo ""

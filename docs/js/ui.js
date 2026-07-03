@@ -2,13 +2,30 @@ import { getPreviewUrl } from './api.js';
 import { getSettings, initTheme } from './settings.js';
 import { resolveThumbnailUrl } from './thumbnail-cache.js';
 
+export function getBasePath() {
+  const base = window.HACKNET_CONFIG?.basePath || '/';
+  return base.endsWith('/') ? base : `${base}/`;
+}
+
 export function pageUrl(page, params = {}) {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value != null && value !== '') qs.set(key, value);
   });
   const query = qs.toString();
-  return query ? `${page}.html?${query}` : `${page}.html`;
+  const file = page === 'index' ? 'index.html' : `${page}.html`;
+  const path = `${getBasePath()}${file}`;
+  return query ? `${path}?${query}` : path;
+}
+
+export function isCreatorUsername(username) {
+  const creator = window.HACKNET_CONFIG?.creatorUsername || 'oli';
+  return String(username || '').toLowerCase() === creator.toLowerCase();
+}
+
+export function creatorBadge(username) {
+  if (!isCreatorUsername(username)) return '';
+  return '<span class="badge badge-creator" title="Creator of Hacknet">Creator</span>';
 }
 
 export function formatBytes(bytes) {
@@ -45,8 +62,8 @@ export function getFileIcon(mimeType) {
   return '📄';
 }
 
-function hasThumbnail(mimeType) {
-  return mimeType?.startsWith('image/');
+function hasPreviewThumb(mimeType) {
+  return mimeType?.startsWith('image/') || mimeType?.startsWith('video/');
 }
 
 function renderCardVisual(file, { hideThumbnails = false } = {}) {
@@ -55,18 +72,12 @@ function renderCardVisual(file, { hideThumbnails = false } = {}) {
     return '';
   }
 
-  const hasCustom = !!file.custom_thumbnail_url;
-  const hasImage = hasThumbnail(file.mime_type) && file.id;
-
-  if (!hasCustom && !hasImage) {
+  if (!hasPreviewThumb(file.mime_type) || !file.id) {
     return `<div class="file-card-thumb file-card-thumb--icon"><span class="file-card-fallback">${icon}</span></div>`;
   }
 
-  const source = hasCustom ? 'custom' : 'preview';
-  const urlAttr = hasCustom ? ` data-thumb-url="${escapeHtml(file.custom_thumbnail_url)}"` : '';
-
   return `
-    <div class="file-card-thumb" data-thumb-id="${file.id}" data-thumb-source="${source}"${urlAttr}>
+    <div class="file-card-thumb" data-thumb-id="${file.id}" data-thumb-mime="${escapeHtml(file.mime_type || '')}">
       <span class="file-card-fallback" aria-hidden="true">${icon}</span>
     </div>
   `;
@@ -79,19 +90,28 @@ async function hydrateCardThumbnails(container) {
   const thumbs = container.querySelectorAll('[data-thumb-id]');
   await Promise.all([...thumbs].map(async (thumb) => {
     const fileId = thumb.dataset.thumbId;
-    const source = thumb.dataset.thumbSource;
+    const mime = thumb.dataset.thumbMime || '';
     try {
-      const fetchUrl = source === 'custom'
-        ? thumb.dataset.thumbUrl
-        : getPreviewUrl(fileId);
-      const url = await resolveThumbnailUrl(fileId, fetchUrl, source);
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = '';
-      img.className = 'file-card-img';
-      img.loading = 'lazy';
-      img.onerror = () => img.remove();
-      thumb.appendChild(img);
+      const fetchUrl = getPreviewUrl(fileId);
+      const url = await resolveThumbnailUrl(fileId, fetchUrl, 'preview');
+      if (mime.startsWith('video/')) {
+        const video = document.createElement('video');
+        video.src = url;
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
+        video.className = 'file-card-img';
+        video.onerror = () => video.remove();
+        thumb.appendChild(video);
+      } else {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = '';
+        img.className = 'file-card-img';
+        img.loading = 'lazy';
+        img.onerror = () => img.remove();
+        thumb.appendChild(img);
+      }
     } catch {
       // Keep fallback icon
     }
@@ -153,25 +173,25 @@ export function renderNav(profile) {
         </button>
         <div class="nav-dropdown">
           <a href="${pageUrl('profile', { u: profile.username })}">Profile</a>
-          <a href="upload.html">Upload</a>
-          <a href="settings.html">Settings</a>
-          ${profile.role === 'moderator' || profile.role === 'admin' ? '<a href="moderation.html">Moderation</a>' : ''}
+          <a href="${pageUrl('upload')}">Upload</a>
+          <a href="${pageUrl('settings')}">Settings</a>
+          ${profile.role === 'moderator' || profile.role === 'admin' ? `<a href="${pageUrl('moderation')}">Moderation</a>` : ''}
           <button type="button" id="logout-btn">Log out</button>
         </div>
       </div>
     `
     : `
-      <a href="settings.html" class="nav-icon-link" title="Settings">⚙️</a>
-      <a href="login.html">Log in</a>
-      <a href="signup.html" class="btn btn-primary btn-sm">Sign up</a>
+      <a href="${pageUrl('settings')}" class="nav-icon-link" title="Settings">⚙️</a>
+      <a href="${pageUrl('login')}">Log in</a>
+      <a href="${pageUrl('signup')}" class="btn btn-primary btn-sm">Sign up</a>
     `;
 
   nav.innerHTML = `
-    <a href="index.html" class="logo">Hacknet</a>
+    <a href="${pageUrl('index')}" class="logo">Hacknet</a>
     <div class="nav-links">
-      <a href="index.html">Discover</a>
-      <a href="search.html">Search</a>
-      <a href="collections.html">Collections</a>
+      <a href="${pageUrl('index')}">Discover</a>
+      <a href="${pageUrl('search')}">Search</a>
+      <a href="${pageUrl('collections')}">Collections</a>
       ${authBlock}
     </div>
   `;
@@ -183,7 +203,7 @@ export function renderNav(profile) {
     logoutBtn.addEventListener('click', async () => {
       const { signOut } = await import('./auth.js');
       await signOut();
-      window.location.href = 'index.html';
+      window.location.href = pageUrl('index');
     });
   }
 }
@@ -201,7 +221,7 @@ export function renderFileCard(file, options = {}) {
       <div class="file-card-body">
         <h3>${escapeHtml(file.title)}</h3>
         <p class="file-meta">
-          <span>@${escapeHtml(username)}</span>
+          <span>@${escapeHtml(username)}${isCreatorUsername(username) ? ' <span class="badge badge-creator badge-sm">Creator</span>' : ''}</span>
           <span>${formatBytes(file.size_bytes)}</span>
           ${options.likeCount != null ? `<span>❤ ${options.likeCount}</span>` : ''}
           ${options.trendScore != null ? `<span>🔥 ${Number(options.trendScore).toFixed(1)}</span>` : ''}

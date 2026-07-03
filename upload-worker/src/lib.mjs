@@ -7,12 +7,23 @@ export const MAX_BYTES = 1024 * 1024 * 1024;
 export const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
 
 export const THUMBNAIL_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+export const VIDEO_TYPES = [
+  'video/mp4', 'video/webm', 'video/ogg',
+  'video/quicktime',
+  'video/x-msvideo', 'video/avi', 'video/msvideo', 'video/vnd.avi',
+  'video/x-matroska',
+  'video/mpeg', 'video/mp2t',
+  'video/3gpp', 'video/3gpp2',
+  'video/x-flv',
+  'video/x-ms-wmv', 'video/x-ms-asf',
+  'video/x-m4v', 'video/hevc', 'video/h264',
+];
 export const PREVIEWABLE_TYPES = [
   ...THUMBNAIL_TYPES,
   'image/svg+xml',
   'application/pdf',
-  'audio/mpeg', 'audio/wav', 'audio/ogg',
-  'video/mp4', 'video/webm',
+  'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/flac', 'audio/webm',
+  ...VIDEO_TYPES,
 ];
 export const ALLOWED_TYPES = [
   ...PREVIEWABLE_TYPES,
@@ -24,6 +35,21 @@ export const ALLOWED_TYPES = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/octet-stream',
 ];
+
+export function isAllowedMime(mime) {
+  if (!mime) return true;
+  if (ALLOWED_TYPES.includes(mime)) return true;
+  return mime.startsWith('video/') || mime.startsWith('audio/');
+}
+
+export function isPreviewableMime(mime) {
+  return (
+    mime.startsWith('image/') ||
+    mime.startsWith('audio/') ||
+    mime.startsWith('video/') ||
+    mime === 'application/pdf'
+  );
+}
 
 const BLOCKED_WORDS = ['nigger', 'nigga', 'faggot', 'fag', 'retard', 'kike', 'chink', 'cunt', 'rape', 'nazi', 'hitler'];
 

@@ -6,23 +6,39 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const MAX_BYTES = 50 * 1024 * 1024;
-const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
-const MEGA_QUOTA_PER_ACCOUNT = 20 * 1024 * 1024 * 1024; // ~20 GB free tier each
-const THUMBNAIL_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const MAX_BYTES = 15 * 1024 * 1024;
+const MEGA_QUOTA_PER_ACCOUNT = 20 * 1024 * 1024 * 1024;
+const VIDEO_TYPES = [
+  'video/mp4', 'video/webm', 'video/ogg',
+  'video/quicktime', // .mov
+  'video/x-msvideo', 'video/avi', 'video/msvideo', 'video/vnd.avi', // .avi
+  'video/x-matroska', // .mkv
+  'video/mpeg', 'video/mp2t', // .mpg, .ts
+  'video/3gpp', 'video/3gpp2', // .3gp
+  'video/x-flv', // .flv
+  'video/x-ms-wmv', 'video/x-ms-asf', // .wmv, .asf
+  'video/x-m4v', 'video/hevc', 'video/h264',
+];
 const ALLOWED_TYPES = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
   'application/pdf',
   'text/plain', 'text/markdown', 'text/csv',
   'application/json', 'application/zip',
-  'audio/mpeg', 'audio/wav', 'audio/ogg',
-  'video/mp4', 'video/webm',
+  'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/flac', 'audio/webm',
+  ...VIDEO_TYPES,
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/octet-stream',
 ];
+
+function isAllowedMime(mime: string) {
+  if (!mime) return true;
+  if (ALLOWED_TYPES.includes(mime)) return true;
+  if (mime.startsWith('video/') || mime.startsWith('audio/')) return true;
+  return false;
+}
 
 type MegaAccount = { email: string; password: string };
 
@@ -104,7 +120,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const autoApprove = Deno.env.get('AUTO_APPROVE') === 'true';
+    const autoApprove = Deno.env.get('AUTO_APPROVE') !== 'false';
     const megaAccounts = loadMegaAccounts();
 
     if (!megaAccounts.length) {
@@ -126,7 +142,6 @@ Deno.serve(async (req) => {
 
     const formData = await req.formData();
     const file = formData.get('file') as File;
-    const thumbnail = formData.get('thumbnail') as File | null;
     const title = (formData.get('title') as string)?.trim();
     const description = (formData.get('description') as string)?.trim() || '';
     const tagsRaw = formData.get('tags') as string;
@@ -141,25 +156,17 @@ Deno.serve(async (req) => {
       return json({ error: 'Please select a file and give it a title.' }, 400);
     }
     if (file.size > MAX_BYTES) {
-      return json({ error: 'That file is too big. Hacknet allows uploads up to 50 MB.' }, 400);
+      return json({ error: 'That file is too big. Hacknet allows uploads up to 15 MB.' }, 400);
     }
-    if (!ALLOWED_TYPES.includes(file.type) && file.type !== '') {
+    if (!isAllowedMime(file.type)) {
       return json({ error: `That file type isn't supported (${file.type || 'unknown'}).` }, 400);
-    }
-    if (thumbnail && thumbnail.size > 0) {
-      if (thumbnail.size > MAX_THUMBNAIL_BYTES) {
-        return json({ error: 'Your cover image is too large. Keep it under 5 MB.' }, 400);
-      }
-      if (!THUMBNAIL_TYPES.includes(thumbnail.type)) {
-        return json({ error: 'Cover images must be JPEG, PNG, GIF, or WebP.' }, 400);
-      }
     }
 
     const adminClient = createClient(supabaseUrl, serviceKey);
     const { index: accountIndex, account } = await pickMegaAccount(
       adminClient,
       megaAccounts,
-      file.size + (thumbnail?.size || 0),
+      file.size,
     );
 
     const storage = await new Storage({
@@ -176,17 +183,6 @@ Deno.serve(async (req) => {
     const uploaded = await folder.upload({ name: file.name, size: file.size }, buffer).complete;
     const megaUrl = await uploaded.link({});
 
-    let customThumbnailUrl: string | null = null;
-    if (thumbnail && thumbnail.size > 0) {
-      const thumbBuffer = new Uint8Array(await thumbnail.arrayBuffer());
-      const thumbName = `cover-${Date.now()}-${thumbnail.name}`;
-      const thumbUploaded = await folder.upload({
-        name: thumbName,
-        size: thumbnail.size,
-      }, thumbBuffer).complete;
-      customThumbnailUrl = await thumbUploaded.link({});
-    }
-
     const { data: fileRow, error: dbError } = await adminClient
       .from('files')
       .insert({
@@ -199,7 +195,6 @@ Deno.serve(async (req) => {
         mega_url: megaUrl,
         mega_file_id: uploaded.nodeId || uploaded.id || null,
         mega_account_index: accountIndex,
-        custom_thumbnail_url: customThumbnailUrl,
         tags,
         status: autoApprove ? 'approved' : 'pending',
       })

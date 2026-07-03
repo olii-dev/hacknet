@@ -4,10 +4,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Busboy from 'busboy';
 import {
-  ALLOWED_TYPES,
+  isAllowedMime,
+  isPreviewableMime,
   MAX_BYTES,
   MAX_THUMBNAIL_BYTES,
-  PREVIEWABLE_TYPES,
   THUMBNAIL_TYPES,
   canAccessFile,
   containsProfanity,
@@ -130,7 +130,7 @@ async function handleUpload(req, res, origin) {
     if (sizeBytes > MAX_BYTES) {
       return sendJson(res, 400, { error: 'That file is too big. Hacknet allows uploads up to 1 GB.' }, headers);
     }
-    if (!ALLOWED_TYPES.includes(mimeType) && mimeType !== '') {
+    if (!isAllowedMime(mimeType)) {
       return sendJson(res, 400, { error: `That file type isn't supported (${mimeType || 'unknown'}).` }, headers);
     }
     if (containsProfanity(title, description, ...(Array.isArray(tags) ? tags : []))) {
@@ -274,7 +274,7 @@ async function handleFileGet(req, res, fileId, origin, { thumbnail = false } = {
     return sendJson(res, 404, { error: 'File is stored externally (legacy Mega upload).' }, headers);
   }
 
-  if (!download && !PREVIEWABLE_TYPES.includes(fileRow.mime_type)) {
+  if (!download && !isPreviewableMime(fileRow.mime_type)) {
     return sendJson(res, 415, { error: 'Preview not supported for this file type.' }, headers);
   }
 
