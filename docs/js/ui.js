@@ -28,6 +28,12 @@ export function creatorBadge(username) {
   return '<span class="badge badge-creator" title="Creator of Hacknet">Creator</span>';
 }
 
+export function creatorUsernameLabel(username) {
+  const name = escapeHtml(username || 'unknown');
+  if (!isCreatorUsername(username)) return `@${name}`;
+  return `<span class="username-creator" title="Creator of Hacknet">@${name}</span>`;
+}
+
 export function formatBytes(bytes) {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -224,8 +230,9 @@ export function renderFileCard(file, options = {}) {
       <div class="file-card-body">
         <h3>${escapeHtml(file.title)}</h3>
         <p class="file-meta">
-          <span>@${escapeHtml(username)}${isCreatorUsername(username) ? ' <span class="badge badge-creator badge-sm">Creator</span>' : ''}</span>
+          <span>${creatorUsernameLabel(username)}</span>
           <span>${formatBytes(file.size_bytes)}</span>
+          <span>${Number(file.view_count) || 0} views</span>
           ${options.likeCount != null ? `<span>❤ ${options.likeCount}</span>` : ''}
           ${options.trendScore != null ? `<span>🔥 ${Number(options.trendScore).toFixed(1)}</span>` : ''}
         </p>

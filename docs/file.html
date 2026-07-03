@@ -14,12 +14,13 @@
     <p class="loading">Loading...</p>
   </main>
   <script type="module">
-    import { initPage, formatBytes, formatDate, escapeHtml, showToast, pageUrl, copyShareLink } from './js/ui.js';
+    import { initPage, formatBytes, formatDate, escapeHtml, showToast, pageUrl, copyShareLink, creatorUsernameLabel } from './js/ui.js';
     import {
       getFile, incrementViews, getLikeCount, hasLiked, toggleLike,
       getComments, addComment, reportFile, updateFile, getDownloadUrl,
+      deleteFile, deleteComment,
     } from './js/api.js';
-    import { getUser } from './js/auth.js';
+    import { getUser, isModerator } from './js/auth.js';
     import { renderPreview } from './js/preview.js';
     import { containsProfanity, profanityMessage } from './js/profanity.js';
 
@@ -36,6 +37,7 @@
 
           const user = getUser();
           const isOwner = user?.id === file.uploader_id;
+          const canDeleteFile = isOwner || isModerator();
           let likeCount = await getLikeCount(fileId);
           let liked = user ? await hasLiked(fileId, user.id) : false;
 
@@ -87,7 +89,7 @@
                     </form>
                   </div>
                   <ul class="meta-list">
-                    <li>Uploaded by <a href="${pageUrl('profile', { u: file.profiles?.username || '' })}">@${escapeHtml(file.profiles?.username || 'unknown')}</a></li>
+                    <li>Uploaded by <a href="${pageUrl('profile', { u: file.profiles?.username || '' })}">${creatorUsernameLabel(file.profiles?.username || 'unknown')}</a></li>
                     <li>Size: ${formatBytes(file.size_bytes)}</li>
                     <li>Type: ${escapeHtml(file.mime_type)}</li>
                     <li>Views: ${file.view_count}</li>
@@ -102,6 +104,7 @@
                     <button id="share-btn" class="btn btn-ghost" type="button">Copy link</button>
                     <a href="${escapeHtml(getDownloadUrl(file.id, file.filename, file))}" class="btn btn-primary" download>Download</a>
                     ${user ? '<button id="report-btn" class="btn btn-ghost">Report</button>' : ''}
+                    ${canDeleteFile ? '<button id="delete-btn" class="btn btn-danger" type="button">Delete</button>' : ''}
                   </div>
                 </div>
               </div>
@@ -117,7 +120,22 @@
                 <a href="${escapeHtml(getDownloadUrl(file.id, file.filename, file))}" class="btn btn-primary" download>Download</a>
               </div>`;
           }
-          await loadComments();
+          await loadComments(user);
+
+          const deleteBtn = document.getElementById('delete-btn');
+          if (deleteBtn) {
+            deleteBtn.addEventListener('click', async () => {
+              const who = isModerator() && !isOwner ? 'this file (moderator delete)' : 'this file';
+              if (!confirm(`Permanently delete ${who}? This cannot be undone.`)) return;
+              try {
+                await deleteFile(fileId);
+                showToast('File deleted', 'success');
+                window.location.href = pageUrl('index');
+              } catch (err) {
+                showToast(err.message || 'Could not delete file', 'error');
+              }
+            });
+          }
 
           const likeBtn = document.getElementById('like-btn');
           if (likeBtn && user) {
@@ -137,7 +155,7 @@
               if (!body) return;
               await addComment(fileId, user.id, body);
               document.getElementById('comment-body').value = '';
-              await loadComments();
+              await loadComments(user);
               showToast('Comment posted', 'success');
             });
           }
@@ -163,20 +181,40 @@
       });
     }
 
-    async function loadComments() {
+    async function loadComments(user) {
       const list = document.getElementById('comments-list');
       if (!list) return;
       const comments = await getComments(fileId);
+      const isMod = isModerator();
       if (!comments.length) {
         list.innerHTML = '<p class="empty-state">No comments yet.</p>';
         return;
       }
-      list.innerHTML = comments.map((c) => `
-        <div class="comment">
-          <div class="comment-header">@${escapeHtml(c.profiles?.username || 'unknown')} · ${formatDate(c.created_at)}</div>
+      list.innerHTML = comments.map((c) => {
+        const canDelete = user && (user.id === c.user_id || isMod);
+        return `
+        <div class="comment" data-comment-id="${c.id}">
+          <div class="comment-header">
+            <span>@${escapeHtml(c.profiles?.username || 'unknown')} · ${formatDate(c.created_at)}</span>
+            ${canDelete ? `<button type="button" class="btn btn-ghost btn-sm comment-delete-btn" data-id="${c.id}">Delete</button>` : ''}
+          </div>
           <p>${escapeHtml(c.body)}</p>
         </div>
-      `).join('');
+      `;
+      }).join('');
+
+      list.querySelectorAll('.comment-delete-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this comment?')) return;
+          try {
+            await deleteComment(btn.dataset.id);
+            showToast('Comment deleted', 'success');
+            await loadComments(user);
+          } catch (err) {
+            showToast(err.message || 'Could not delete comment', 'error');
+          }
+        });
+      });
     }
 
     function setupEditForm(file) {

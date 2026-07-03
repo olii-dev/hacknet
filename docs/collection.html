@@ -15,8 +15,8 @@
   </main>
   <script type="module">
     import { initPage, renderFileGrid, escapeHtml, formatDate, showToast, pageUrl } from './js/ui.js';
-    import { getCollection, getCollectionFiles, addToCollection } from './js/api.js';
-    import { getUser } from './js/auth.js';
+    import { getCollection, getCollectionFiles, addToCollection, deleteCollection } from './js/api.js';
+    import { getUser, isModerator } from './js/auth.js';
 
     const main = document.getElementById('main-content');
     const collectionId = new URLSearchParams(window.location.search).get('id');
@@ -30,6 +30,7 @@
           const files = await getCollectionFiles(collectionId);
           const user = getUser();
           const isOwner = user?.id === collection.user_id;
+          const canDelete = isOwner || isModerator();
 
           main.innerHTML = `
             <div class="page-header">
@@ -40,6 +41,11 @@
                 · ${formatDate(collection.created_at)}
                 · ${collection.is_public ? 'Public' : 'Private'}
               </p>
+              ${canDelete ? `
+                <p style="margin-top:1rem">
+                  <button type="button" id="delete-collection-btn" class="btn btn-danger btn-sm">Delete collection</button>
+                </p>
+              ` : ''}
             </div>
             ${isOwner ? `
               <div class="sidebar-card" style="margin-bottom:2rem">
@@ -64,6 +70,17 @@
               window.location.reload();
             });
           }
+
+          document.getElementById('delete-collection-btn')?.addEventListener('click', async () => {
+            if (!confirm('Permanently delete this collection? Files in it will not be deleted.')) return;
+            try {
+              await deleteCollection(collectionId);
+              showToast('Collection deleted', 'success');
+              window.location.href = pageUrl('collections');
+            } catch (err) {
+              showToast(err.message || 'Could not delete collection', 'error');
+            }
+          });
         } catch (err) {
           main.innerHTML = `<p class="error-state">${escapeHtml(err.message)}</p>`;
         }

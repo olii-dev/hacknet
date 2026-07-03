@@ -458,9 +458,20 @@ main {
 }
 
 .comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   font-size: 0.8rem;
   color: var(--text-muted);
   margin-bottom: 0.4rem;
+}
+
+.collection-card-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .comment-form { display: flex; gap: 0.5rem; margin-top: 1rem; }
@@ -780,6 +791,14 @@ main {
   font-size: 0.62rem;
   padding: 0.1rem 0.4rem;
   margin-left: 0.25rem;
+}
+
+.username-creator {
+  font-weight: 600;
+  background: linear-gradient(135deg, #6c8cff, #9b6cff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .profile-title {

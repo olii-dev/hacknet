@@ -25,7 +25,7 @@
     import { initPage, escapeHtml, formatDate, showToast, pageUrl, formatBytes } from './js/ui.js';
     import {
       getPendingFiles, getOpenReports,
-      moderateFile, resolveReport, getMegaStorageStats,
+      moderateFile, resolveReport, getMegaStorageStats, deleteFile,
     } from './js/api.js';
     import { requireModerator } from './js/auth.js';
 
@@ -81,6 +81,7 @@
               <a href="${pageUrl('file', { id: f.id })}" class="btn btn-ghost">View</a>
               <button class="btn btn-success approve-btn" data-id="${f.id}">Approve</button>
               <button class="btn btn-danger reject-btn" data-id="${f.id}">Reject</button>
+              <button class="btn btn-danger delete-btn" data-id="${f.id}">Delete</button>
             </div>
           </div>
         `).join('');
@@ -97,6 +98,18 @@
             await moderateFile(btn.dataset.id, 'rejected');
             showToast('File rejected', 'success');
             await loadPending();
+          });
+        });
+        pendingList.querySelectorAll('.delete-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            if (!confirm('Permanently delete this file? This cannot be undone.')) return;
+            try {
+              await deleteFile(btn.dataset.id);
+              showToast('File deleted', 'success');
+              await loadPending();
+            } catch (err) {
+              showToast(err.message || 'Could not delete file', 'error');
+            }
           });
         });
       } catch (err) {
@@ -122,6 +135,7 @@
             </div>
             <div class="mod-actions">
               <a href="${pageUrl('file', { id: r.file_id })}" class="btn btn-ghost">View File</a>
+              <button class="btn btn-danger delete-file-btn" data-file-id="${r.file_id}">Delete File</button>
               <button class="btn btn-primary resolve-btn" data-id="${r.id}">Resolve</button>
             </div>
           </div>
@@ -132,6 +146,18 @@
             await resolveReport(btn.dataset.id);
             showToast('Report resolved', 'success');
             await loadReports();
+          });
+        });
+        reportsList.querySelectorAll('.delete-file-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            if (!confirm('Permanently delete the reported file? This cannot be undone.')) return;
+            try {
+              await deleteFile(btn.dataset.fileId);
+              showToast('File deleted', 'success');
+              await loadReports();
+            } catch (err) {
+              showToast(err.message || 'Could not delete file', 'error');
+            }
           });
         });
       } catch (err) {

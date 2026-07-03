@@ -115,7 +115,7 @@ export async function toggleLike(fileId, userId, currentlyLiked) {
 export async function getComments(fileId) {
   const { data, error } = await supabase
     .from('comments')
-    .select('id, body, created_at, profiles!comments_user_id_fkey (username, avatar_url)')
+    .select('id, user_id, body, created_at, profiles!comments_user_id_fkey (username, avatar_url)')
     .eq('file_id', fileId)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -250,6 +250,21 @@ export async function getOpenReports() {
 
 export async function moderateFile(fileId, status) {
   const { error } = await supabase.from('files').update({ status }).eq('id', fileId);
+  if (error) throw error;
+}
+
+export async function deleteFile(fileId) {
+  const { error } = await supabase.from('files').delete().eq('id', fileId);
+  if (error) throw error;
+}
+
+export async function deleteComment(commentId) {
+  const { error } = await supabase.from('comments').delete().eq('id', commentId);
+  if (error) throw error;
+}
+
+export async function deleteCollection(collectionId) {
+  const { error } = await supabase.from('collections').delete().eq('id', collectionId);
   if (error) throw error;
 }
 

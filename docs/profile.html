@@ -14,8 +14,8 @@
     <p class="loading">Loading...</p>
   </main>
   <script type="module">
-    import { initPage, renderFileGrid, escapeHtml, formatDate, showToast, pageUrl, creatorBadge } from './js/ui.js';
-    import { getProfile, getUserFiles, getUserCollections, createCollection } from './js/api.js';
+    import { initPage, renderFileGrid, escapeHtml, formatDate, showToast, pageUrl, creatorUsernameLabel } from './js/ui.js';
+    import { getProfile, getUserFiles, getUserCollections, createCollection, deleteCollection } from './js/api.js';
     import { getUser, getProfile as getMyProfile, updateProfile } from './js/auth.js';
 
     const main = document.getElementById('main-content');
@@ -43,7 +43,7 @@
 
           main.innerHTML = `
             <div class="page-header">
-              <h1 class="profile-title">@${escapeHtml(profile.username)} ${creatorBadge(profile.username)}</h1>
+              <h1 class="profile-title">${creatorUsernameLabel(profile.username)}</h1>
               <p>${escapeHtml(profile.bio || 'No bio yet.')}</p>
               <p style="color:var(--text-muted);font-size:0.85rem">Joined ${formatDate(profile.created_at)}</p>
             </div>
@@ -80,10 +80,28 @@
             if (collections.length) {
               colList.innerHTML = collections.map((c) => `
                 <div class="collection-card">
-                  <h3><a href="${pageUrl('collection', { id: c.id })}">${escapeHtml(c.name)}</a></h3>
-                  <p>${escapeHtml(c.description || '')} · ${c.is_public ? 'Public' : 'Private'}</p>
+                  <div class="collection-card-row">
+                    <div>
+                      <h3><a href="${pageUrl('collection', { id: c.id })}">${escapeHtml(c.name)}</a></h3>
+                      <p>${escapeHtml(c.description || '')} · ${c.is_public ? 'Public' : 'Private'}</p>
+                    </div>
+                    <button type="button" class="btn btn-danger btn-sm delete-collection-btn" data-id="${c.id}">Delete</button>
+                  </div>
                 </div>
               `).join('');
+
+              colList.querySelectorAll('.delete-collection-btn').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                  if (!confirm('Delete this collection? Files in it will not be deleted.')) return;
+                  try {
+                    await deleteCollection(btn.dataset.id);
+                    showToast('Collection deleted', 'success');
+                    btn.closest('.collection-card')?.remove();
+                  } catch (err) {
+                    showToast(err.message || 'Could not delete collection', 'error');
+                  }
+                });
+              });
             } else {
               colList.innerHTML = '<p class="empty-state">No collections yet.</p>';
             }
