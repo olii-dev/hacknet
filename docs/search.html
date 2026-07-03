@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Search — Hacknet</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/config.js"></script>
+  <script src="js/theme-init.js"></script>
+</head>
+<body>
+  <header><nav id="site-nav"></nav></header>
+  <main>
+    <div class="page-header">
+      <h1>Search</h1>
+      <p>Find files by name, filename, description, or tags.</p>
+    </div>
+
+    <form id="search-form" class="search-panel">
+      <div class="search-bar">
+        <input type="search" id="query" placeholder="Search files..." autocomplete="off" autofocus>
+        <button type="submit" class="btn btn-primary">Search</button>
+      </div>
+
+      <div class="search-filters">
+        <div class="search-filter">
+          <label for="tags">Tags</label>
+          <input type="text" id="tags" placeholder="Comma-separated tags">
+        </div>
+        <div class="search-filter">
+          <label for="type">File type</label>
+          <select id="type">
+            <option value="">All types</option>
+            <option value="image/">Images</option>
+            <option value="video/">Videos</option>
+            <option value="audio/">Audio</option>
+            <option value="application/pdf">PDFs</option>
+            <option value="text/">Text</option>
+            <option value="application/zip">Archives</option>
+          </select>
+        </div>
+        <div class="search-filter">
+          <label for="sort">Sort by</label>
+          <select id="sort">
+            <option value="relevance">Relevance</option>
+            <option value="newest">Newest</option>
+            <option value="popular">Most viewed</option>
+          </select>
+        </div>
+      </div>
+    </form>
+
+    <div id="popular-tags" class="popular-tags" hidden>
+      <span class="popular-tags-label">Popular tags:</span>
+      <div id="tag-chips" class="tag-chips"></div>
+    </div>
+
+    <p id="result-count" class="result-count" hidden></p>
+    <div id="file-grid" class="file-grid"></div>
+  </main>
+  <script type="module">
+    import { initPage, renderFileGrid, setLoading, showError, pageUrl } from './js/ui.js';
+    import { searchFiles, getPopularTags } from './js/api.js';
+
+    const grid = document.getElementById('file-grid');
+    const form = document.getElementById('search-form');
+    const resultCount = document.getElementById('result-count');
+    const popularTagsEl = document.getElementById('popular-tags');
+    const tagChips = document.getElementById('tag-chips');
+    let debounceTimer = null;
+
+    function parseTags(raw) {
+      return raw.split(',').map((t) => t.trim()).filter(Boolean);
+    }
+
+    function readForm() {
+      return {
+        query: document.getElementById('query').value.trim(),
+        tags: parseTags(document.getElementById('tags').value),
+        mimePrefix: document.getElementById('type').value,
+        sortBy: document.getElementById('sort').value,
+      };
+    }
+
+    function syncUrl({ query, tags, mimePrefix, sortBy }) {
+      const params = new URLSearchParams();
+      if (query) params.set('q', query);
+      if (tags.length) params.set('tags', tags.join(','));
+      if (mimePrefix) params.set('type', mimePrefix);
+      if (sortBy && sortBy !== 'relevance') params.set('sort', sortBy);
+      const qs = params.toString();
+      history.replaceState(null, '', qs ? `${pageUrl('search')}?${qs}` : pageUrl('search'));
+    }
+
+    async function doSearch(opts, { updateUrl = true } = {}) {
+      const { query, tags, mimePrefix, sortBy } = opts;
+      if (updateUrl) syncUrl(opts);
+
+      const hasQuery = query || tags.length || mimePrefix;
+      if (!hasQuery) {
+        resultCount.hidden = true;
+        grid.innerHTML = '<p class="empty-state">Search by keyword, tag, or file type — results update as you type.</p>';
+        return;
+      }
+
+      setLoading(grid);
+      try {
+        const files = await searchFiles(query, tags, {
+          mimePrefix: mimePrefix || null,
+          sortBy,
+        });
+        await renderFileGrid(files, grid);
+        resultCount.textContent = `${files.length} result${files.length === 1 ? '' : 's'}`;
+        resultCount.hidden = false;
+      } catch (err) {
+        showError(grid, err.message);
+        resultCount.hidden = true;
+      }
+    }
+
+    function scheduleSearch() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => doSearch(readForm()), 300);
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      clearTimeout(debounceTimer);
+      doSearch(readForm());
+    });
+
+    ['query', 'tags', 'type', 'sort'].forEach((id) => {
+      document.getElementById(id).addEventListener('input', scheduleSearch);
+      document.getElementById(id).addEventListener('change', scheduleSearch);
+    });
+
+    function addTagChip(tag) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tag tag-chip';
+      btn.textContent = tag;
+      btn.addEventListener('click', () => {
+        const current = parseTags(document.getElementById('tags').value);
+        if (!current.includes(tag)) {
+          current.push(tag);
+          document.getElementById('tags').value = current.join(', ');
+        }
+        doSearch(readForm());
+      });
+      tagChips.appendChild(btn);
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('q') || '';
+    const t = params.get('tags') || '';
+    const type = params.get('type') || '';
+    const sort = params.get('sort') || 'relevance';
+    document.getElementById('query').value = q;
+    document.getElementById('tags').value = t;
+    document.getElementById('type').value = type;
+    document.getElementById('sort').value = sort;
+
+    initPage(async () => {
+      try {
+        const popular = await getPopularTags();
+        if (popular.length) {
+          popular.forEach((row) => addTagChip(row.tag));
+          popularTagsEl.hidden = false;
+        }
+      } catch {
+        popularTagsEl.hidden = true;
+      }
+
+      doSearch({ query: q, tags: parseTags(t), mimePrefix: type, sortBy: sort }, { updateUrl: false });
+    });
+  </script>
+</body>
+</html>

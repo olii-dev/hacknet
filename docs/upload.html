@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Upload — Hacknet</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/config.js"></script>
+  <script src="js/theme-init.js"></script>
+</head>
+<body>
+  <header><nav id="site-nav"></nav></header>
+  <main>
+    <div class="page-header">
+      <h1>Upload</h1>
+      <p>Share a file with the community. Up to 1 GB per file.</p>
+    </div>
+    <div class="form-card">
+      <form id="upload-form">
+        <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Drop file here or browse">
+          <div class="drop-zone-icon">📁</div>
+          <p class="drop-zone-title">Drag & drop your file here</p>
+          <p class="drop-zone-hint">or click to browse</p>
+          <p class="drop-zone-file" id="drop-zone-file" hidden></p>
+          <img id="drop-zone-preview" class="drop-zone-preview" alt="" hidden>
+        </div>
+        <input type="file" id="file" class="file-input-hidden" required>
+        <div class="form-group">
+          <label for="title">Title</label>
+          <input type="text" id="title" required maxlength="200" placeholder="Give your file a name">
+        </div>
+        <div class="form-group">
+          <label for="description">Description</label>
+          <textarea id="description" placeholder="What's this file about?"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="tags">Tags (comma-separated)</label>
+          <input type="text" id="tags" placeholder="music, tutorial, wallpaper">
+        </div>
+        <div class="form-group">
+          <label for="thumbnail">Custom cover image (optional)</label>
+          <p class="settings-hint" style="margin-bottom:0.5rem">Shown on file cards. JPEG, PNG, GIF, or WebP — max 5 MB.</p>
+          <input type="file" id="thumbnail" accept="image/jpeg,image/png,image/gif,image/webp">
+          <div id="cover-preview-wrap" class="cover-preview-wrap" hidden>
+            <img id="cover-preview" class="cover-preview" alt="">
+            <button type="button" class="btn btn-ghost btn-sm" id="remove-cover-btn">Remove cover</button>
+          </div>
+        </div>
+        <div class="upload-progress-panel" id="progress-wrap" hidden>
+          <div class="upload-progress-header">
+            <span class="upload-progress-label" id="progress-label">Uploading…</span>
+            <span class="upload-progress-stats" id="progress-stats">0% · 0 B / 0 B</span>
+          </div>
+          <div class="upload-progress">
+            <div class="upload-progress-bar" id="progress-bar"></div>
+          </div>
+          <div class="upload-progress-actions">
+            <button type="button" class="btn btn-ghost btn-sm" id="cancel-upload-btn">Cancel upload</button>
+          </div>
+        </div>
+        <p class="form-error" id="form-error" style="display:none"></p>
+        <button type="submit" class="btn btn-primary" id="submit-btn">Upload</button>
+      </form>
+    </div>
+  </main>
+  <script type="module">
+    import { initPage, showToast, pageUrl, formatBytes } from './js/ui.js';
+    import { requireAuth } from './js/auth.js';
+    import { uploadFile, formatUploadError, UploadCancelledError, formatUploadMbps } from './js/api.js';
+    import { containsProfanity, profanityMessage } from './js/profanity.js';
+
+    const form = document.getElementById('upload-form');
+    const errorEl = document.getElementById('form-error');
+    const progressWrap = document.getElementById('progress-wrap');
+    const progressBar = document.getElementById('progress-bar');
+    const progressLabel = document.getElementById('progress-label');
+    const progressStats = document.getElementById('progress-stats');
+    const cancelUploadBtn = document.getElementById('cancel-upload-btn');
+    const submitBtn = document.getElementById('submit-btn');
+    const fileInput = document.getElementById('file');
+    const dropZone = document.getElementById('drop-zone');
+    const dropZoneFile = document.getElementById('drop-zone-file');
+    const dropZonePreview = document.getElementById('drop-zone-preview');
+    const thumbnailInput = document.getElementById('thumbnail');
+    const coverPreviewWrap = document.getElementById('cover-preview-wrap');
+    const coverPreview = document.getElementById('cover-preview');
+    const removeCoverBtn = document.getElementById('remove-cover-btn');
+    const maxBytes = window.HACKNET_CONFIG.maxUploadBytes;
+    const maxThumbBytes = window.HACKNET_CONFIG.maxThumbnailBytes;
+    let previewObjectUrl = null;
+    let coverObjectUrl = null;
+    let uploadAbortController = null;
+
+    function setFormDisabled(disabled) {
+      submitBtn.disabled = disabled;
+      fileInput.disabled = disabled;
+      thumbnailInput.disabled = disabled;
+      dropZone.style.pointerEvents = disabled ? 'none' : '';
+      dropZone.style.opacity = disabled ? '0.6' : '';
+      document.getElementById('title').disabled = disabled;
+      document.getElementById('description').disabled = disabled;
+      document.getElementById('tags').disabled = disabled;
+    }
+
+    function resetProgress() {
+      progressWrap.hidden = true;
+      progressBar.style.width = '0%';
+      progressBar.classList.remove('is-processing');
+      progressLabel.textContent = 'Uploading…';
+      progressStats.textContent = '0% · 0 B / 0 B';
+      cancelUploadBtn.disabled = false;
+    }
+
+    function updateProgress({ phase, loaded, total, percent, bytesPerSecond }) {
+      progressWrap.hidden = false;
+      const safeTotal = total || loaded || 0;
+      const pct = percent != null ? Math.min(100, Math.max(0, percent)) : (safeTotal ? (loaded / safeTotal) * 100 : 0);
+      const displayPct = phase === 'processing' ? 100 : Math.round(pct);
+      const speedLabel = phase === 'uploading' ? formatUploadMbps(bytesPerSecond) : '—';
+
+      progressBar.style.width = `${displayPct}%`;
+      progressBar.classList.toggle('is-processing', phase === 'processing');
+      progressLabel.textContent = phase === 'processing' ? 'Saving to Mega…' : 'Uploading…';
+      progressStats.textContent = `${displayPct}% · ${formatBytes(loaded)} / ${formatBytes(safeTotal)} · ${speedLabel}`;
+    }
+
+    cancelUploadBtn.addEventListener('click', () => {
+      if (uploadAbortController) {
+        cancelUploadBtn.disabled = true;
+        progressLabel.textContent = 'Cancelling…';
+        uploadAbortController.abort();
+      }
+    });
+
+    initPage(async () => {
+      if (!(await requireAuth())) return;
+    });
+
+    function clearPreview() {
+      if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+        previewObjectUrl = null;
+      }
+      dropZonePreview.hidden = true;
+      dropZonePreview.removeAttribute('src');
+    }
+
+    function handleFileSelected(file) {
+      if (!file) return;
+
+      if (file.size > maxBytes) {
+        errorEl.textContent = `That file is too big. Hacknet allows uploads up to ${formatBytes(maxBytes)}.`;
+        errorEl.style.display = 'block';
+        submitBtn.disabled = true;
+        return;
+      }
+
+      errorEl.style.display = 'none';
+      submitBtn.disabled = false;
+      dropZoneFile.textContent = `${file.name} (${formatBytes(file.size)})`;
+      dropZoneFile.hidden = false;
+
+      if (!document.getElementById('title').value) {
+        document.getElementById('title').value = file.name.replace(/\.[^.]+$/, '');
+      }
+
+      clearPreview();
+      if (file.type.startsWith('image/')) {
+        previewObjectUrl = URL.createObjectURL(file);
+        dropZonePreview.src = previewObjectUrl;
+        dropZonePreview.hidden = false;
+      }
+    }
+
+    function setSelectedFile(file) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      handleFileSelected(file);
+    }
+
+    fileInput.addEventListener('change', (e) => {
+      handleFileSelected(e.target.files[0]);
+    });
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    ['dragenter', 'dragover'].forEach((event) => {
+      dropZone.addEventListener(event, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-over');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach((event) => {
+      dropZone.addEventListener(event, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+      });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const file = e.dataTransfer.files[0];
+      if (file) setSelectedFile(file);
+    });
+
+    function clearCoverImage() {
+      if (coverObjectUrl) {
+        URL.revokeObjectURL(coverObjectUrl);
+        coverObjectUrl = null;
+      }
+      thumbnailInput.value = '';
+      coverPreview.removeAttribute('src');
+      coverPreviewWrap.hidden = true;
+    }
+
+    thumbnailInput.addEventListener('change', (e) => {
+      const thumb = e.target.files[0];
+      if (coverObjectUrl) {
+        URL.revokeObjectURL(coverObjectUrl);
+        coverObjectUrl = null;
+      }
+      coverPreview.removeAttribute('src');
+      coverPreviewWrap.hidden = true;
+      if (!thumb) return;
+      if (thumb.size > maxThumbBytes) {
+        errorEl.textContent = 'Your cover image is too large. Keep it under 5 MB.';
+        errorEl.style.display = 'block';
+        return;
+      }
+      errorEl.style.display = 'none';
+      coverObjectUrl = URL.createObjectURL(thumb);
+      coverPreview.src = coverObjectUrl;
+      coverPreviewWrap.hidden = false;
+    });
+
+    removeCoverBtn.addEventListener('click', () => {
+      clearCoverImage();
+      errorEl.style.display = 'none';
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.style.display = 'none';
+
+      const file = fileInput.files[0];
+      if (!file) {
+        errorEl.textContent = 'Please select a file to upload.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const title = document.getElementById('title').value.trim();
+      const description = document.getElementById('description').value.trim();
+      const tags = document.getElementById('tags').value
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      if (containsProfanity(title, description, tags.join(' '))) {
+        errorEl.textContent = profanityMessage();
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      uploadAbortController = new AbortController();
+      setFormDisabled(true);
+      updateProgress({ phase: 'uploading', loaded: 0, total: file.size, percent: 0 });
+
+      try {
+        const thumbnail = thumbnailInput.files[0] || null;
+        const result = await uploadFile(
+          file,
+          { title, description, tags },
+          thumbnail,
+          {
+            signal: uploadAbortController.signal,
+            onProgress: updateProgress,
+          },
+        );
+
+        progressLabel.textContent = 'Upload complete!';
+        progressBar.classList.remove('is-processing');
+        showToast(
+          result.status === 'approved' ? 'Upload complete!' : 'Uploaded — pending moderation.',
+          'success',
+        );
+        setTimeout(() => {
+          window.location.href = pageUrl('file', { id: result.id });
+        }, 800);
+      } catch (err) {
+        resetProgress();
+        setFormDisabled(false);
+        uploadAbortController = null;
+
+        if (err instanceof UploadCancelledError) {
+          showToast('Upload cancelled.', 'info');
+          return;
+        }
+
+        errorEl.textContent = formatUploadError(err);
+        errorEl.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

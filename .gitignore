@@ -1,0 +1,7 @@
+.DS_Store
+.env
+.env.*
+supabase/.temp/
+upload-worker/node_modules/
+upload-worker/.env
+upload-worker/.bin/

@@ -1,0 +1,17 @@
+# For CLI reference — create project via Supabase dashboard
+project_id = "hacknet"
+
+[api]
+enabled = true
+
+[db]
+major_version = 15
+
+[functions.mega-upload]
+verify_jwt = false
+
+[functions.mega-cover]
+verify_jwt = false
+
+[functions.mega-preview]
+verify_jwt = false

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — Hacknet</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/config.js"></script>
+  <script src="js/theme-init.js"></script>
+</head>
+<body>
+  <header><nav id="site-nav"></nav></header>
+  <main class="settings-page">
+    <div class="page-header">
+      <h1>Settings</h1>
+      <p>Customize how Hacknet looks on your device.</p>
+    </div>
+
+    <section class="settings-card">
+      <h2>Appearance</h2>
+
+      <div class="settings-row">
+        <div class="settings-label">
+          <strong>Theme</strong>
+          <span>Match your device or pick one</span>
+        </div>
+        <div class="theme-picker" role="group" aria-label="Theme">
+          <button type="button" class="theme-option" data-theme="system">System</button>
+          <button type="button" class="theme-option" data-theme="light">Light</button>
+          <button type="button" class="theme-option" data-theme="dark">Dark</button>
+        </div>
+      </div>
+
+      <div class="settings-row settings-row--toggle">
+        <div class="settings-label">
+          <strong>Hide thumbnails</strong>
+          <span>Compact list — text-only file cards</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="hide-thumbnails">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <h2>Thumbnails</h2>
+      <p class="settings-hint">Preview images are cached on your device for 7 days so they load faster.</p>
+      <button type="button" class="btn btn-ghost" id="clear-cache-btn">Clear thumbnail cache</button>
+    </section>
+  </main>
+  <script type="module">
+    import { initPage, showToast } from './js/ui.js';
+    import { getSettings, setTheme, setHideThumbnails } from './js/settings.js';
+    import { clearThumbnailCache } from './js/thumbnail-cache.js';
+
+    function syncThemePicker(theme) {
+      document.querySelectorAll('.theme-option').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.theme === theme);
+      });
+    }
+
+    initPage(() => {
+      const { theme, hideThumbnails } = getSettings();
+      syncThemePicker(theme);
+      document.getElementById('hide-thumbnails').checked = hideThumbnails;
+
+      document.querySelectorAll('.theme-option').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          setTheme(btn.dataset.theme);
+          syncThemePicker(btn.dataset.theme);
+          showToast('Theme updated', 'success');
+        });
+      });
+
+      document.getElementById('hide-thumbnails').addEventListener('change', (e) => {
+        setHideThumbnails(e.target.checked);
+        showToast(e.target.checked ? 'Thumbnails hidden' : 'Thumbnails shown', 'success');
+        setTimeout(() => window.location.reload(), 400);
+      });
+
+      document.getElementById('clear-cache-btn').addEventListener('click', async () => {
+        await clearThumbnailCache();
+        showToast('Thumbnail cache cleared', 'success');
+      });
+    });
+  </script>
+</body>
+</html>

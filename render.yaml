@@ -1,0 +1,25 @@
+# Deploy on Render.com (alternative if Fly.io asks for a credit card)
+# Dashboard → New → Blueprint → connect this repo
+services:
+  - type: web
+    name: hacknet-upload
+    runtime: docker
+    dockerfilePath: upload-worker/Dockerfile
+    dockerContext: upload-worker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: MEGA_EMAIL
+        sync: false
+      - key: MEGA_PASSWORD
+        sync: false
+      - key: AUTO_APPROVE
+        value: "false"
+      - key: ALLOWED_ORIGINS
+        value: "*"

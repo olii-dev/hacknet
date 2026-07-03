@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File — Hacknet</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/config.js"></script>
+  <script src="js/theme-init.js"></script>
+</head>
+<body>
+  <header><nav id="site-nav"></nav></header>
+  <main id="main-content">
+    <p class="loading">Loading...</p>
+  </main>
+  <script type="module">
+    import { initPage, formatBytes, formatDate, escapeHtml, showToast, pageUrl, copyShareLink } from './js/ui.js';
+    import {
+      getFile, incrementViews, getLikeCount, hasLiked, toggleLike,
+      getComments, addComment, reportFile, updateFile, uploadCoverImage, getDownloadUrl,
+    } from './js/api.js';
+    import { getUser } from './js/auth.js';
+    import { renderPreview } from './js/preview.js';
+    import { containsProfanity, profanityMessage } from './js/profanity.js';
+
+    const main = document.getElementById('main-content');
+    const fileId = new URLSearchParams(window.location.search).get('id');
+
+    if (!fileId) {
+      main.innerHTML = '<p class="error-state">No file specified.</p>';
+    } else {
+      initPage(async () => {
+        try {
+          const file = await getFile(fileId);
+          if (file.status === 'approved') await incrementViews(fileId);
+
+          const user = getUser();
+          const isOwner = user?.id === file.uploader_id;
+          let likeCount = await getLikeCount(fileId);
+          let liked = user ? await hasLiked(fileId, user.id) : false;
+
+          const tags = (file.tags || [])
+            .map((t) => `<a href="${pageUrl('search', { tags: t })}" class="tag">${escapeHtml(t)}</a>`)
+            .join('');
+
+          main.innerHTML = `
+            <div class="file-detail">
+              <div>
+                <div class="preview-box" id="preview"></div>
+                <div class="comments-section">
+                  <h2>Comments</h2>
+                  <div id="comments-list"></div>
+                  ${user ? `
+                    <form id="comment-form" class="comment-form">
+                      <textarea id="comment-body" placeholder="Add a comment..." rows="2" required></textarea>
+                      <button type="submit" class="btn btn-primary">Post</button>
+                    </form>
+                  ` : '<p class="empty-state">Log in to comment.</p>'}
+                </div>
+              </div>
+              <div>
+                <div class="sidebar-card" id="file-sidebar">
+                  <div class="sidebar-card-header">
+                    <h2 id="file-title">${escapeHtml(file.title)}</h2>
+                    ${isOwner ? '<button type="button" id="edit-btn" class="btn btn-ghost btn-sm">Edit</button>' : ''}
+                  </div>
+                  <p id="file-description" style="color:var(--text-muted);font-size:0.9rem;margin-bottom:1rem">${escapeHtml(file.description || '')}</p>
+                  <div id="edit-panel" class="edit-panel" hidden>
+                    <form id="edit-form">
+                      <div class="form-group">
+                        <label for="edit-title">Title</label>
+                        <input type="text" id="edit-title" required maxlength="200">
+                      </div>
+                      <div class="form-group">
+                        <label for="edit-description">Description</label>
+                        <textarea id="edit-description" placeholder="What's this file about?"></textarea>
+                      </div>
+                      <div class="form-group">
+                        <label for="edit-tags">Tags (comma-separated)</label>
+                        <input type="text" id="edit-tags">
+                      </div>
+                      <div class="form-group">
+                        <label for="edit-cover">Custom cover image</label>
+                        <p class="settings-hint" style="margin-bottom:0.5rem">JPEG, PNG, GIF, or WebP — max 5 MB.</p>
+                        ${file.custom_thumbnail_url ? `
+                          <img src="${escapeHtml(file.custom_thumbnail_url)}" alt="Current cover" class="cover-preview" id="current-cover">
+                          <label class="checkbox-label">
+                            <input type="checkbox" id="remove-cover"> Remove current cover
+                          </label>
+                        ` : '<p class="settings-hint" id="no-cover-hint">No custom cover set.</p>'}
+                        <input type="file" id="edit-cover" accept="image/jpeg,image/png,image/gif,image/webp">
+                        <img id="edit-cover-preview" class="cover-preview" alt="" hidden>
+                      </div>
+                      <p class="form-error" id="edit-error" style="display:none"></p>
+                      <div class="action-row">
+                        <button type="submit" class="btn btn-primary" id="save-edit-btn">Save changes</button>
+                        <button type="button" class="btn btn-ghost" id="cancel-edit-btn">Cancel</button>
+                      </div>
+                    </form>
+                  </div>
+                  <ul class="meta-list">
+                    <li>Uploaded by <a href="${pageUrl('profile', { u: file.profiles?.username || '' })}">@${escapeHtml(file.profiles?.username || 'unknown')}</a></li>
+                    <li>Size: ${formatBytes(file.size_bytes)}</li>
+                    <li>Type: ${escapeHtml(file.mime_type)}</li>
+                    <li>Views: ${file.view_count}</li>
+                    <li>Uploaded: ${formatDate(file.created_at)}</li>
+                    <li>Status: <span class="status-badge status-${file.status}">${file.status}</span></li>
+                  </ul>
+                  ${tags ? `<div class="tags" id="file-tags" style="margin-top:0.75rem">${tags}</div>` : '<div class="tags" id="file-tags" style="margin-top:0.75rem" hidden></div>'}
+                  <div class="action-row">
+                    <button id="like-btn" class="btn btn-ghost" ${user ? '' : 'disabled'}>
+                      ${liked ? '❤️' : '🤍'} <span id="like-count">${likeCount}</span>
+                    </button>
+                    <button id="share-btn" class="btn btn-ghost" type="button">Copy link</button>
+                    <a href="${escapeHtml(getDownloadUrl(file.id, file.filename))}" class="btn btn-primary" download>Download</a>
+                    ${user ? '<button id="report-btn" class="btn btn-ghost">Report</button>' : ''}
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+
+          await renderPreview(file, document.getElementById('preview'));
+          await loadComments();
+
+          const likeBtn = document.getElementById('like-btn');
+          if (likeBtn && user) {
+            likeBtn.addEventListener('click', async () => {
+              liked = await toggleLike(fileId, user.id, liked);
+              likeCount += liked ? 1 : -1;
+              document.getElementById('like-count').textContent = likeCount;
+              likeBtn.innerHTML = `${liked ? '❤️' : '🤍'} <span id="like-count">${likeCount}</span>`;
+            });
+          }
+
+          const commentForm = document.getElementById('comment-form');
+          if (commentForm) {
+            commentForm.addEventListener('submit', async (e) => {
+              e.preventDefault();
+              const body = document.getElementById('comment-body').value.trim();
+              if (!body) return;
+              await addComment(fileId, user.id, body);
+              document.getElementById('comment-body').value = '';
+              await loadComments();
+              showToast('Comment posted', 'success');
+            });
+          }
+
+          const reportBtn = document.getElementById('report-btn');
+          if (reportBtn) {
+            reportBtn.addEventListener('click', async () => {
+              const reason = prompt('Why are you reporting this file?');
+              if (!reason?.trim()) return;
+              await reportFile(fileId, user.id, reason.trim());
+              showToast('Report submitted', 'success');
+            });
+          }
+
+          document.getElementById('share-btn')?.addEventListener('click', () => {
+            copyShareLink(window.location.href);
+          });
+
+          if (isOwner) setupEditForm(file);
+        } catch (err) {
+          main.innerHTML = `<p class="error-state">${escapeHtml(err.message)}</p>`;
+        }
+      });
+    }
+
+    async function loadComments() {
+      const list = document.getElementById('comments-list');
+      if (!list) return;
+      const comments = await getComments(fileId);
+      if (!comments.length) {
+        list.innerHTML = '<p class="empty-state">No comments yet.</p>';
+        return;
+      }
+      list.innerHTML = comments.map((c) => `
+        <div class="comment">
+          <div class="comment-header">@${escapeHtml(c.profiles?.username || 'unknown')} · ${formatDate(c.created_at)}</div>
+          <p>${escapeHtml(c.body)}</p>
+        </div>
+      `).join('');
+    }
+
+    function setupEditForm(file) {
+      const editBtn = document.getElementById('edit-btn');
+      const editPanel = document.getElementById('edit-panel');
+      const editForm = document.getElementById('edit-form');
+      const cancelBtn = document.getElementById('cancel-edit-btn');
+      const errorEl = document.getElementById('edit-error');
+      const coverInput = document.getElementById('edit-cover');
+      const coverPreview = document.getElementById('edit-cover-preview');
+      const removeCover = document.getElementById('remove-cover');
+      const maxThumbBytes = window.HACKNET_CONFIG.maxThumbnailBytes;
+      let coverObjectUrl = null;
+
+      document.getElementById('edit-title').value = file.title;
+      document.getElementById('edit-description').value = file.description || '';
+      document.getElementById('edit-tags').value = (file.tags || []).join(', ');
+
+      const showView = () => {
+        editPanel.hidden = true;
+        document.getElementById('file-title').hidden = false;
+        document.getElementById('file-description').hidden = false;
+        document.getElementById('file-tags').hidden = !(file.tags || []).length;
+        errorEl.style.display = 'none';
+      };
+
+      const showEdit = () => {
+        editPanel.hidden = false;
+        document.getElementById('file-title').hidden = true;
+        document.getElementById('file-description').hidden = true;
+        document.getElementById('file-tags').hidden = true;
+      };
+
+      editBtn?.addEventListener('click', showEdit);
+      cancelBtn?.addEventListener('click', () => {
+        if (coverObjectUrl) {
+          URL.revokeObjectURL(coverObjectUrl);
+          coverObjectUrl = null;
+        }
+        editForm.reset();
+        document.getElementById('edit-title').value = file.title;
+        document.getElementById('edit-description').value = file.description || '';
+        document.getElementById('edit-tags').value = (file.tags || []).join(', ');
+        if (coverPreview) {
+          coverPreview.hidden = true;
+          coverPreview.removeAttribute('src');
+        }
+        if (removeCover) removeCover.checked = false;
+        showView();
+      });
+
+      coverInput?.addEventListener('change', (e) => {
+        const thumb = e.target.files[0];
+        if (coverObjectUrl) {
+          URL.revokeObjectURL(coverObjectUrl);
+          coverObjectUrl = null;
+        }
+        if (!thumb) {
+          if (coverPreview) coverPreview.hidden = true;
+          return;
+        }
+        if (thumb.size > maxThumbBytes) {
+          errorEl.textContent = 'Your cover image is too large. Keep it under 5 MB.';
+          errorEl.style.display = 'block';
+          coverInput.value = '';
+          return;
+        }
+        errorEl.style.display = 'none';
+        if (removeCover) removeCover.checked = false;
+        coverObjectUrl = URL.createObjectURL(thumb);
+        coverPreview.src = coverObjectUrl;
+        coverPreview.hidden = false;
+      });
+
+      removeCover?.addEventListener('change', () => {
+        if (removeCover.checked) {
+          coverInput.value = '';
+          if (coverPreview) {
+            coverPreview.hidden = true;
+            coverPreview.removeAttribute('src');
+          }
+          if (coverObjectUrl) {
+            URL.revokeObjectURL(coverObjectUrl);
+            coverObjectUrl = null;
+          }
+        }
+      });
+
+      editForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorEl.style.display = 'none';
+
+        const title = document.getElementById('edit-title').value.trim();
+        const description = document.getElementById('edit-description').value.trim();
+        const tags = document.getElementById('edit-tags').value
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean);
+        const newCover = coverInput?.files[0] || null;
+        const shouldRemoveCover = removeCover?.checked && !newCover;
+
+        if (!title) {
+          errorEl.textContent = 'Title is required.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (containsProfanity(title, description, tags.join(' '))) {
+          errorEl.textContent = profanityMessage();
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        const saveBtn = document.getElementById('save-edit-btn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+
+        try {
+          let updated = file;
+
+          if (newCover) {
+            updated = await uploadCoverImage(fileId, newCover);
+          } else if (shouldRemoveCover) {
+            updated = await updateFile(fileId, { custom_thumbnail_url: null });
+          }
+
+          const metaChanged = title !== file.title
+            || description !== (file.description || '')
+            || JSON.stringify(tags) !== JSON.stringify(file.tags || []);
+
+          if (metaChanged) {
+            updated = await updateFile(fileId, { title, description, tags });
+          }
+
+          Object.assign(file, updated);
+
+          document.getElementById('file-title').textContent = file.title;
+          document.getElementById('file-description').textContent = file.description || '';
+
+          const currentCover = document.getElementById('current-cover');
+          if (currentCover && file.custom_thumbnail_url) {
+            currentCover.src = file.custom_thumbnail_url;
+          }
+          if (removeCover) removeCover.checked = false;
+
+          const tagsEl = document.getElementById('file-tags');
+          const tagHtml = (file.tags || [])
+            .map((t) => `<a href="${pageUrl('search', { tags: t })}" class="tag">${escapeHtml(t)}</a>`)
+            .join('');
+          if (tagHtml) {
+            tagsEl.innerHTML = tagHtml;
+            tagsEl.hidden = false;
+          } else {
+            tagsEl.innerHTML = '';
+            tagsEl.hidden = true;
+          }
+
+          if (coverObjectUrl) {
+            URL.revokeObjectURL(coverObjectUrl);
+            coverObjectUrl = null;
+          }
+          coverInput.value = '';
+          if (coverPreview) {
+            coverPreview.hidden = true;
+            coverPreview.removeAttribute('src');
+          }
+
+          showView();
+          showToast('Changes saved', 'success');
+        } catch (err) {
+          errorEl.textContent = err.message || 'Failed to save changes.';
+          errorEl.style.display = 'block';
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save changes';
+        }
+      });
+    }
+  </script>
+</body>
+</html>

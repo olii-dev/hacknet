@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Discover — Hacknet</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/config.js"></script>
+  <script src="js/theme-init.js"></script>
+</head>
+<body>
+  <header><nav id="site-nav"></nav></header>
+  <main>
+    <div class="page-header">
+      <h1>Discover</h1>
+      <p>Browse community uploads — recent, popular, and trending files.</p>
+    </div>
+    <div class="tabs" id="feed-tabs">
+      <button class="tab active" data-feed="recent">Recent</button>
+      <button class="tab" data-feed="popular">Popular</button>
+      <button class="tab" data-feed="trending">Trending</button>
+    </div>
+    <div id="file-grid" class="file-grid"></div>
+  </main>
+  <script type="module">
+    import { initPage, renderFileGrid, setLoading, showError } from './js/ui.js';
+    import { getRecentFiles, getPopularFiles, getTrendingFiles } from './js/api.js';
+
+    const grid = document.getElementById('file-grid');
+    const tabs = document.querySelectorAll('.tab');
+    let activeFeed = 'recent';
+
+    async function loadFeed(feed) {
+      setLoading(grid);
+      try {
+        let files;
+        if (feed === 'recent') files = await getRecentFiles();
+        else if (feed === 'popular') files = await getPopularFiles();
+        else files = await getTrendingFiles();
+        await renderFileGrid(files, grid);
+      } catch (err) {
+        showError(grid, err.message);
+      }
+    }
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        tabs.forEach((t) => t.classList.remove('active'));
+        tab.classList.add('active');
+        activeFeed = tab.dataset.feed;
+        loadFeed(activeFeed);
+      });
+    });
+
+    initPage(() => loadFeed(activeFeed));
+  </script>
+</body>
+</html>

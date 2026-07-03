@@ -1,0 +1,15 @@
+[Unit]
+Description=Cloudflare tunnel for Hacknet upload worker
+After=network.target hacknet-upload.service
+Requires=hacknet-upload.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared tunnel --url http://127.0.0.1:__PORT__
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

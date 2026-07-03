@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moderation — Hacknet</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/config.js"></script>
+  <script src="js/theme-init.js"></script>
+</head>
+<body>
+  <header><nav id="site-nav"></nav></header>
+  <main>
+    <div class="page-header">
+      <h1>Moderation</h1>
+      <p>Review pending uploads and open reports.</p>
+    </div>
+    <div id="storage-stats" class="sidebar-card" style="margin-bottom:2rem"></div>
+    <h2 style="margin-bottom:1rem">Pending Files</h2>
+    <div id="pending-list"><p class="loading">Loading...</p></div>
+    <h2 style="margin:2rem 0 1rem">Open Reports</h2>
+    <div id="reports-list"><p class="loading">Loading...</p></div>
+  </main>
+  <script type="module">
+    import { initPage, escapeHtml, formatDate, showToast, pageUrl, formatBytes } from './js/ui.js';
+    import {
+      getPendingFiles, getOpenReports,
+      moderateFile, resolveReport, getMegaStorageStats,
+    } from './js/api.js';
+    import { requireModerator } from './js/auth.js';
+
+    const pendingList = document.getElementById('pending-list');
+    const reportsList = document.getElementById('reports-list');
+
+    initPage(async () => {
+      if (!(await requireModerator())) return;
+      await loadStorageStats();
+      await loadPending();
+      await loadReports();
+    });
+
+    async function loadStorageStats() {
+      const el = document.getElementById('storage-stats');
+      try {
+        const data = await getMegaStorageStats();
+        const rows = data.accounts || [];
+        el.innerHTML = `
+          <h2>Storage</h2>
+          <p class="settings-hint">${data.account_count} account(s) · ${formatBytes(data.total_used)} / ${formatBytes(data.total_quota)} used</p>
+          ${rows.map((r) => `
+            <p style="font-size:0.85rem;margin-top:0.4rem">
+              Account ${Number(r.mega_account_index) + 1} (${escapeHtml(r.label)}):
+              ${formatBytes(r.bytes_used)} / ${formatBytes(r.quota_bytes)}
+              (${r.file_count} files)
+            </p>
+          `).join('')}
+        `;
+      } catch (err) {
+        el.innerHTML = `<p class="settings-hint">Could not load storage stats: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    async function loadPending() {
+      try {
+        const files = await getPendingFiles();
+        if (!files.length) {
+          pendingList.innerHTML = '<p class="empty-state">No pending files.</p>';
+          return;
+        }
+        pendingList.innerHTML = files.map((f) => `
+          <div class="mod-item" data-id="${f.id}">
+            <div>
+              <strong>${escapeHtml(f.title)}</strong>
+              <p style="color:var(--text-muted);font-size:0.85rem">
+                ${escapeHtml(f.filename)} · by @${escapeHtml(f.profiles?.username || 'unknown')}
+                · ${formatDate(f.created_at)}
+              </p>
+              <p style="font-size:0.85rem;margin-top:0.3rem">${escapeHtml(f.description || '')}</p>
+            </div>
+            <div class="mod-actions">
+              <a href="${pageUrl('file', { id: f.id })}" class="btn btn-ghost">View</a>
+              <button class="btn btn-success approve-btn" data-id="${f.id}">Approve</button>
+              <button class="btn btn-danger reject-btn" data-id="${f.id}">Reject</button>
+            </div>
+          </div>
+        `).join('');
+
+        pendingList.querySelectorAll('.approve-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            await moderateFile(btn.dataset.id, 'approved');
+            showToast('File approved', 'success');
+            await loadPending();
+          });
+        });
+        pendingList.querySelectorAll('.reject-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            await moderateFile(btn.dataset.id, 'rejected');
+            showToast('File rejected', 'success');
+            await loadPending();
+          });
+        });
+      } catch (err) {
+        pendingList.innerHTML = `<p class="error-state">${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    async function loadReports() {
+      try {
+        const reports = await getOpenReports();
+        if (!reports.length) {
+          reportsList.innerHTML = '<p class="empty-state">No open reports.</p>';
+          return;
+        }
+        reportsList.innerHTML = reports.map((r) => `
+          <div class="mod-item">
+            <div>
+              <strong>Report on: ${escapeHtml(r.files?.title || 'Unknown')}</strong>
+              <p style="color:var(--text-muted);font-size:0.85rem">
+                by @${escapeHtml(r.profiles?.username || 'unknown')} · ${formatDate(r.created_at)}
+              </p>
+              <p style="font-size:0.85rem;margin-top:0.3rem">${escapeHtml(r.reason)}</p>
+            </div>
+            <div class="mod-actions">
+              <a href="${pageUrl('file', { id: r.file_id })}" class="btn btn-ghost">View File</a>
+              <button class="btn btn-primary resolve-btn" data-id="${r.id}">Resolve</button>
+            </div>
+          </div>
+        `).join('');
+
+        reportsList.querySelectorAll('.resolve-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            await resolveReport(btn.dataset.id);
+            showToast('Report resolved', 'success');
+            await loadReports();
+          });
+        });
+      } catch (err) {
+        reportsList.innerHTML = `<p class="error-state">${escapeHtml(err.message)}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>
