@@ -4,8 +4,11 @@ import { Readable } from 'node:stream';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, range',
+  'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
 };
+
+const BUFFER_LIMIT = 5 * 1024 * 1024;
 
 function isPreviewableMime(mime: string) {
   return (
@@ -14,6 +17,44 @@ function isPreviewableMime(mime: string) {
     mime.startsWith('video/') ||
     mime === 'application/pdf'
   );
+}
+
+function isStreamableMime(mime: string) {
+  return mime.startsWith('video/') || mime.startsWith('audio/');
+}
+
+function parseRange(rangeHeader: string | null, size: number): { start: number; end: number } | null {
+  if (!rangeHeader || size <= 0) return null;
+  const match = /^bytes=(\d+)-(\d*)$/i.exec(rangeHeader.trim());
+  if (!match) return null;
+
+  const start = Number(match[1]);
+  let end = match[2] !== '' ? Number(match[2]) : size - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= size) {
+    return null;
+  }
+  end = Math.min(end, size - 1);
+  if (end < start) return null;
+  return { start, end };
+}
+
+function buildHeaders(mime: string, filename: string, download: boolean, totalSize: number) {
+  const disposition = download
+    ? `attachment; filename="${filename.replace(/"/g, '')}"`
+    : `inline; filename="${filename.replace(/"/g, '')}"`;
+
+  const headers: Record<string, string> = {
+    ...corsHeaders,
+    'Content-Type': mime,
+    'Content-Disposition': disposition,
+    'Cache-Control': download ? 'private, max-age=0' : 'public, max-age=3600',
+  };
+
+  if (totalSize > 0 && isStreamableMime(mime)) {
+    headers['Accept-Ranges'] = 'bytes';
+  }
+
+  return headers;
 }
 
 Deno.serve(async (req) => {
@@ -70,21 +111,42 @@ Deno.serve(async (req) => {
     const megaFile = File.fromURL(file.mega_url);
     await megaFile.loadAttributes();
 
-    const disposition = download
-      ? `attachment; filename="${file.filename.replace(/"/g, '')}"`
-      : `inline; filename="${file.filename.replace(/"/g, '')}"`;
+    const totalSize = megaFile.size || file.size_bytes || 0;
+    const filename = file.filename || 'download';
+    const headers = buildHeaders(mime, filename, download, totalSize);
 
-    const headers: Record<string, string> = {
-      ...corsHeaders,
-      'Content-Type': mime,
-      'Content-Disposition': disposition,
-      'Cache-Control': download ? 'private, max-age=0' : 'public, max-age=3600',
-    };
+    if (req.method === 'HEAD') {
+      if (totalSize > 0) headers['Content-Length'] = String(totalSize);
+      return new Response(null, { headers });
+    }
 
-    const size = megaFile.size || file.size_bytes || 0;
-    if (size > 0) headers['Content-Length'] = String(size);
+    const range = parseRange(req.headers.get('range'), totalSize);
+    if (range && isStreamableMime(mime)) {
+      const { start, end } = range;
+      const chunkSize = end - start + 1;
+      headers['Content-Range'] = `bytes ${start}-${end}/${totalSize}`;
+      headers['Content-Length'] = String(chunkSize);
 
-    // Stream large files — buffering blows Edge memory limits (HTTP 546).
+      const nodeStream = megaFile.download({ start, end: end + 1 });
+      const webStream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
+      return new Response(webStream, { status: 206, headers });
+    }
+
+    if (req.headers.get('range') && totalSize > 0) {
+      return new Response('Range not satisfiable', {
+        status: 416,
+        headers: { ...corsHeaders, 'Content-Range': `bytes */${totalSize}` },
+      });
+    }
+
+    if (!isStreamableMime(mime) && totalSize > 0 && totalSize <= BUFFER_LIMIT) {
+      const buffer = await megaFile.downloadBuffer({ start: 0, end: totalSize });
+      headers['Content-Length'] = String(buffer.byteLength);
+      return new Response(buffer, { headers });
+    }
+
+    if (totalSize > 0) headers['Content-Length'] = String(totalSize);
+
     const webStream = Readable.toWeb(megaFile.download()) as ReadableStream<Uint8Array>;
     return new Response(webStream, { headers });
   } catch (err) {

@@ -26,7 +26,7 @@ export async function renderPreview(file, container) {
 
   if (mime.startsWith('video/')) {
     const url = await authenticatedPreviewUrl(file);
-    container.innerHTML = `<video controls class="preview-video" preload="metadata"><source src="${url}" type="${mime}">Your browser can't play this video format — use Download instead.</video>`;
+    container.innerHTML = `<video controls playsinline preload="metadata" class="preview-video" src="${url}">Your browser can't play this video — use Download instead.</video>`;
     return;
   }
 

@@ -249,10 +249,7 @@
 
         progressLabel.textContent = 'Upload complete!';
         progressBar.classList.remove('is-processing');
-        showToast(
-          result.status === 'approved' ? 'Upload complete!' : 'Uploaded — pending moderation.',
-          'success',
-        );
+        showToast('Upload complete!', 'success');
         setTimeout(() => {
           window.location.href = pageUrl('file', { id: result.id });
         }, 800);
