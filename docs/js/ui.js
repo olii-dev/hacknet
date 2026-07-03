@@ -1,6 +1,6 @@
 import { getPreviewUrl } from './api.js';
+import { getAccessToken } from './auth.js';
 import { getSettings, initTheme } from './settings.js';
-import { resolveThumbnailUrl } from './thumbnail-cache.js';
 
 export function getBasePath() {
   const base = window.HACKNET_CONFIG?.basePath || '/';
@@ -87,35 +87,38 @@ async function hydrateCardThumbnails(container) {
   const { hideThumbnails } = getSettings();
   if (hideThumbnails) return;
 
+  const token = await getAccessToken();
+  const extra = token ? { token } : {};
+
   const thumbs = container.querySelectorAll('[data-thumb-id]');
-  await Promise.all([...thumbs].map(async (thumb) => {
+  thumbs.forEach((thumb) => {
     const fileId = thumb.dataset.thumbId;
     const mime = thumb.dataset.thumbMime || '';
-    try {
-      const fetchUrl = getPreviewUrl(fileId);
-      const url = await resolveThumbnailUrl(fileId, fetchUrl, 'preview');
-      if (mime.startsWith('video/')) {
-        const video = document.createElement('video');
-        video.src = url;
-        video.preload = 'metadata';
-        video.muted = true;
-        video.playsInline = true;
-        video.className = 'file-card-img';
-        video.onerror = () => video.remove();
-        thumb.appendChild(video);
-      } else {
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = '';
-        img.className = 'file-card-img';
-        img.loading = 'lazy';
-        img.onerror = () => img.remove();
-        thumb.appendChild(img);
-      }
-    } catch {
-      // Keep fallback icon
+    const url = getPreviewUrl(fileId, extra);
+    const removeFallback = () => thumb.querySelector('.file-card-fallback')?.remove();
+
+    if (mime.startsWith('video/')) {
+      const video = document.createElement('video');
+      video.src = url;
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      video.className = 'file-card-img';
+      video.onloadeddata = removeFallback;
+      video.onerror = () => video.remove();
+      thumb.appendChild(video);
+      return;
     }
-  }));
+
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.className = 'file-card-img';
+    img.loading = 'lazy';
+    img.onload = removeFallback;
+    img.onerror = () => img.remove();
+    thumb.appendChild(img);
+  });
 }
 
 export function escapeHtml(str) {
