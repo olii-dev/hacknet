@@ -14,8 +14,14 @@
     <p class="loading">Loading...</p>
   </main>
   <script type="module">
-    import { initPage, renderFileGrid, escapeHtml, formatDate, formatBytes, showToast, pageUrl } from './js/ui.js';
-    import { getCollection, getCollectionFiles, getUserFiles, addToCollection, deleteCollection } from './js/api.js';
+    import {
+      initPage, renderFileGrid, escapeHtml, formatDate, formatBytes,
+      showToast, pageUrl, creatorUsernameLabel, copyShareLink,
+    } from './js/ui.js';
+    import {
+      getCollection, getCollectionFiles, getUserFiles,
+      addToCollection, removeFromCollection, deleteCollection, updateCollection,
+    } from './js/api.js';
     import { getUser, isModerator } from './js/auth.js';
 
     const main = document.getElementById('main-content');
@@ -27,47 +33,100 @@
       initPage(async () => {
         try {
           const collection = await getCollection(collectionId);
-          const files = await getCollectionFiles(collectionId);
           const user = getUser();
           const isOwner = user?.id === collection.user_id;
           const canDelete = isOwner || isModerator();
+          let files = await getCollectionFiles(collectionId, { includeUnapproved: isOwner });
+
+          const visibilityBadge = collection.is_public
+            ? '<span class="collection-badge collection-badge--public">Public</span>'
+            : '<span class="collection-badge collection-badge--private">Private</span>';
 
           main.innerHTML = `
             <div class="page-header">
-              <h1>${escapeHtml(collection.name)}</h1>
-              <p>${escapeHtml(collection.description || '')}</p>
-              <p style="color:var(--text-muted);font-size:0.85rem">
-                by <a href="${pageUrl('profile', { u: collection.profiles?.username || '' })}">@${escapeHtml(collection.profiles?.username || 'unknown')}</a>
-                · ${formatDate(collection.created_at)}
-                · ${collection.is_public ? 'Public' : 'Private'}
+              <div class="collection-card-head" style="margin-bottom:0.5rem">
+                <h1 style="margin:0">${escapeHtml(collection.name)}</h1>
+                ${visibilityBadge}
+              </div>
+              ${collection.description ? `<p>${escapeHtml(collection.description)}</p>` : ''}
+              <div class="collection-header-meta">
+                <span>by <a href="${pageUrl('profile', { u: collection.profiles?.username || '' })}">${creatorUsernameLabel(collection.profiles?.username || 'unknown')}</a></span>
+                <span>${formatDate(collection.created_at)}</span>
+                <span id="file-count-label">${files.length} ${files.length === 1 ? 'file' : 'files'}</span>
+              </div>
+              <p style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:0.5rem">
+                <button type="button" id="copy-link-btn" class="btn btn-ghost btn-sm">Copy link</button>
+                ${canDelete ? `<button type="button" id="delete-collection-btn" class="btn btn-danger btn-sm">Delete collection</button>` : ''}
               </p>
-              ${canDelete ? `
-                <p style="margin-top:1rem">
-                  <button type="button" id="delete-collection-btn" class="btn btn-danger btn-sm">Delete collection</button>
-                </p>
-              ` : ''}
             </div>
+
             ${isOwner ? `
-              <div class="sidebar-card" style="margin-bottom:2rem">
-                <h2>Add File to Collection</h2>
-                <p class="settings-hint" style="margin-bottom:0.75rem">Search your uploads and add them to this collection.</p>
-                <div class="file-picker">
-                  <input type="search" id="upload-search" class="file-picker-search" placeholder="Search by title, filename, or tag…" autocomplete="off">
-                  <div id="upload-picker-list" class="file-picker-list"></div>
-                  <p id="upload-picker-empty" class="empty-state" hidden>No matching uploads.</p>
-                </div>
+              <div class="collection-owner-tools">
+                <details class="sidebar-card" id="edit-collection-panel">
+                  <summary style="cursor:pointer;font-weight:600">Collection settings</summary>
+                  <form id="collection-edit-form" style="margin-top:1rem">
+                    <div class="form-group">
+                      <label for="col-edit-name">Name</label>
+                      <input type="text" id="col-edit-name" required maxlength="100" value="${escapeHtml(collection.name)}">
+                    </div>
+                    <div class="form-group">
+                      <label for="col-edit-desc">Description</label>
+                      <textarea id="col-edit-desc" maxlength="500" placeholder="What's this collection about?">${escapeHtml(collection.description || '')}</textarea>
+                    </div>
+                    <label class="settings-row settings-row--toggle" style="margin-bottom:1rem">
+                      <div class="settings-label">
+                        <strong>Public collection</strong>
+                        <span>Visible on the Collections page</span>
+                      </div>
+                      <span class="toggle">
+                        <input type="checkbox" id="col-edit-public" ${collection.is_public ? 'checked' : ''}>
+                        <span class="toggle-slider"></span>
+                      </span>
+                    </label>
+                    <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
+                  </form>
+                </details>
+
+                <details class="sidebar-card" id="add-files-panel" ${files.length ? '' : 'open'}>
+                  <summary style="cursor:pointer;font-weight:600">Add files from your uploads</summary>
+                  <p class="settings-hint" style="margin:0.75rem 0">Search by title, filename, or tag.</p>
+                  <div class="file-picker">
+                    <input type="search" id="upload-search" class="file-picker-search" placeholder="Search your uploads…" autocomplete="off">
+                    <div id="upload-picker-list" class="file-picker-list"></div>
+                    <p id="upload-picker-empty" class="empty-state" hidden>No matching uploads.</p>
+                  </div>
+                </details>
               </div>
             ` : ''}
+
             <div id="file-grid" class="file-grid"></div>
           `;
 
           const grid = document.getElementById('file-grid');
-          await renderFileGrid(files, grid);
+          const countLabel = document.getElementById('file-count-label');
 
-          if (isOwner) {
-            const myUploads = await getUserFiles(user.id, true);
-            setupUploadPicker(collectionId, myUploads, files, grid);
+          async function refreshGrid() {
+            files = await getCollectionFiles(collectionId, { includeUnapproved: isOwner });
+            countLabel.textContent = `${files.length} ${files.length === 1 ? 'file' : 'files'}`;
+            await renderFileGrid(files, grid, {
+              emptyMessage: isOwner
+                ? 'No files yet — use "Add files from your uploads" above.'
+                : 'This collection is empty.',
+              removableCollectionId: isOwner ? collectionId : null,
+              onRemoveFromCollection: isOwner ? async (fileId) => {
+                await removeFromCollection(collectionId, fileId);
+                showToast('Removed from collection', 'success');
+                await refreshGrid();
+                if (picker) picker.onCollectionChanged();
+              } : null,
+            });
           }
+
+          await refreshGrid();
+
+          document.getElementById('copy-link-btn')?.addEventListener('click', () => {
+            copyShareLink(window.location.href);
+          });
 
           document.getElementById('delete-collection-btn')?.addEventListener('click', async () => {
             if (!confirm('Permanently delete this collection? Files in it will not be deleted.')) return;
@@ -79,13 +138,34 @@
               showToast(err.message || 'Could not delete collection', 'error');
             }
           });
+
+          let picker = null;
+          if (isOwner) {
+            document.getElementById('collection-edit-form').addEventListener('submit', async (e) => {
+              e.preventDefault();
+              try {
+                const updated = await updateCollection(collectionId, {
+                  name: document.getElementById('col-edit-name').value.trim(),
+                  description: document.getElementById('col-edit-desc').value.trim(),
+                  is_public: document.getElementById('col-edit-public').checked,
+                });
+                showToast('Collection updated', 'success');
+                document.querySelector('.page-header h1').textContent = updated.name;
+              } catch (err) {
+                showToast(err.message || 'Could not save collection', 'error');
+              }
+            });
+
+            const myUploads = await getUserFiles(user.id, true);
+            picker = setupUploadPicker(collectionId, myUploads, files, refreshGrid);
+          }
         } catch (err) {
           main.innerHTML = `<p class="error-state">${escapeHtml(err.message)}</p>`;
         }
       });
     }
 
-    function setupUploadPicker(collectionId, uploads, inCollection, grid) {
+    function setupUploadPicker(collectionId, uploads, inCollection, refreshGrid) {
       const search = document.getElementById('upload-search');
       const list = document.getElementById('upload-picker-list');
       const empty = document.getElementById('upload-picker-empty');
@@ -136,8 +216,7 @@
               showToast('File added to collection', 'success');
               available = available.filter((f) => f.id !== btn.dataset.id);
               inSet.add(btn.dataset.id);
-              const updated = await getCollectionFiles(collectionId);
-              await renderFileGrid(updated, grid);
+              await refreshGrid();
               render(search.value);
             } catch (err) {
               showToast(err.message || 'Could not add file', 'error');
@@ -149,6 +228,17 @@
 
       search.addEventListener('input', () => render(search.value));
       render();
+
+      return {
+        onCollectionChanged() {
+          inSet.clear();
+          getCollectionFiles(collectionId, { includeUnapproved: true }).then((current) => {
+            current.forEach((f) => inSet.add(f.id));
+            available = uploads.filter((f) => !inSet.has(f.id));
+            render(search.value);
+          });
+        },
+      };
     }
   </script>
 </body>

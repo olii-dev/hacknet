@@ -1,6 +1,7 @@
 import { getPreviewUrl } from './api.js';
 import { getAccessToken } from './auth.js';
 import { getSettings, initTheme } from './settings.js';
+import { resolveThumbnailUrl, resolveVideoPosterUrl } from './thumbnail-cache.js';
 
 export function getBasePath() {
   const base = window.HACKNET_CONFIG?.basePath || '/';
@@ -72,13 +73,19 @@ function hasPreviewThumb(mimeType) {
   return mimeType?.startsWith('image/') || mimeType?.startsWith('video/');
 }
 
+function shouldHydrateThumb(file) {
+  if (!file?.id) return false;
+  if (file.custom_thumbnail_url) return true;
+  return hasPreviewThumb(file.mime_type);
+}
+
 function renderCardVisual(file, { hideThumbnails = false } = {}) {
   const icon = getFileIcon(file.mime_type);
   if (hideThumbnails) {
     return '';
   }
 
-  if (!hasPreviewThumb(file.mime_type) || !file.id) {
+  if (!shouldHydrateThumb(file)) {
     return `<div class="file-card-thumb file-card-thumb--icon"><span class="file-card-fallback">${icon}</span></div>`;
   }
 
@@ -89,23 +96,63 @@ function renderCardVisual(file, { hideThumbnails = false } = {}) {
   `;
 }
 
-async function hydrateCardThumbnails(container) {
+function appendCardImage(thumb, url, removeFallback) {
+  const img = document.createElement('img');
+  img.src = url;
+  img.alt = '';
+  img.className = 'file-card-img';
+  img.loading = 'lazy';
+  img.onload = removeFallback;
+  img.onerror = () => img.remove();
+  thumb.appendChild(img);
+}
+
+async function hydrateCardThumbnails(container, files = []) {
   const { hideThumbnails } = getSettings();
   if (hideThumbnails) return;
 
+  const fileMap = new Map((files || []).map((f) => [f.id, f]));
   const token = await getAccessToken();
   const extra = token ? { token } : {};
 
   const thumbs = container.querySelectorAll('[data-thumb-id]');
-  thumbs.forEach((thumb) => {
+  await Promise.all([...thumbs].map(async (thumb) => {
     const fileId = thumb.dataset.thumbId;
-    const mime = thumb.dataset.thumbMime || '';
-    const url = getPreviewUrl(fileId, extra);
+    const file = fileMap.get(fileId);
+    const mime = thumb.dataset.thumbMime || file?.mime_type || '';
     const removeFallback = () => thumb.querySelector('.file-card-fallback')?.remove();
 
+    if (file?.custom_thumbnail_url) {
+      try {
+        const url = await resolveThumbnailUrl(fileId, file.custom_thumbnail_url, 'custom');
+        appendCardImage(thumb, url, removeFallback);
+      } catch {
+        appendCardImage(thumb, file.custom_thumbnail_url, removeFallback);
+      }
+      return;
+    }
+
+    const previewUrl = getPreviewUrl(fileId, extra, file);
+
+    if (mime.startsWith('image/')) {
+      try {
+        const url = await resolveThumbnailUrl(fileId, previewUrl, 'preview');
+        appendCardImage(thumb, url, removeFallback);
+      } catch {
+        appendCardImage(thumb, previewUrl, removeFallback);
+      }
+      return;
+    }
+
     if (mime.startsWith('video/')) {
+      const posterUrl = await resolveVideoPosterUrl(fileId, previewUrl);
+      if (posterUrl) {
+        appendCardImage(thumb, posterUrl, removeFallback);
+        return;
+      }
+
       const video = document.createElement('video');
-      video.src = url;
+      video.src = previewUrl;
       video.preload = 'metadata';
       video.muted = true;
       video.playsInline = true;
@@ -113,18 +160,8 @@ async function hydrateCardThumbnails(container) {
       video.onloadeddata = removeFallback;
       video.onerror = () => video.remove();
       thumb.appendChild(video);
-      return;
     }
-
-    const img = document.createElement('img');
-    img.src = url;
-    img.alt = '';
-    img.className = 'file-card-img';
-    img.loading = 'lazy';
-    img.onload = removeFallback;
-    img.onerror = () => img.remove();
-    thumb.appendChild(img);
-  });
+  }));
 }
 
 export function escapeHtml(str) {
@@ -217,6 +254,70 @@ export function renderNav(profile) {
   }
 }
 
+export function renderCollectionCard(collection, options = {}) {
+  const {
+    showOwner = true,
+    showVisibility = false,
+    showDelete = false,
+    link = pageUrl('collection', { id: collection.id }),
+  } = options;
+
+  const description = collection.description?.trim();
+  const fileCount = collection.file_count ?? 0;
+  const fileLabel = fileCount === 1 ? '1 file' : `${fileCount} files`;
+  const visibility = collection.is_public
+    ? '<span class="collection-badge collection-badge--public">Public</span>'
+    : '<span class="collection-badge collection-badge--private">Private</span>';
+
+  return `
+    <article class="collection-card">
+      <div class="collection-card-main">
+        <div class="collection-card-head">
+          <h3><a href="${link}">${escapeHtml(collection.name)}</a></h3>
+          ${showVisibility ? visibility : ''}
+        </div>
+        ${description ? `<p class="collection-card-desc">${escapeHtml(description)}</p>` : ''}
+        <p class="collection-card-meta">
+          ${showOwner ? `<span>${creatorUsernameLabel(collection.profiles?.username || 'unknown')}</span>` : ''}
+          <span>${fileLabel}</span>
+          <span>${formatDate(collection.created_at)}</span>
+        </p>
+      </div>
+      ${showDelete ? `
+        <button type="button" class="btn btn-danger btn-sm delete-collection-btn" data-id="${collection.id}">
+          Delete
+        </button>
+      ` : ''}
+    </article>
+  `;
+}
+
+export function renderCollectionsList(collections, options = {}) {
+  if (!collections?.length) {
+    return `<p class="empty-state">${escapeHtml(options.emptyMessage || 'No collections yet.')}</p>`;
+  }
+  const gridClass = options.grid ? 'collections-grid' : 'collections-list';
+  return `
+    <div class="${gridClass}">
+      ${collections.map((c) => renderCollectionCard(c, options)).join('')}
+    </div>
+  `;
+}
+
+export function bindCollectionDeleteButtons(container, onDelete) {
+  container.querySelectorAll('.delete-collection-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this collection? Files in it will not be deleted.')) return;
+      try {
+        await onDelete(btn.dataset.id);
+        btn.closest('.collection-card')?.remove();
+      } catch (err) {
+        showToast(err.message || 'Could not delete collection', 'error');
+      }
+    });
+  });
+}
+
 export function renderFileCard(file, options = {}) {
   const username = file.profiles?.username || 'unknown';
   const hideThumbnails = options.hideThumbnails ?? getSettings().hideThumbnails;
@@ -243,19 +344,32 @@ export function renderFileCard(file, options = {}) {
 }
 
 export async function renderFileGrid(files, container, options = {}) {
+  const emptyMessage = options.emptyMessage || 'No files found.';
   if (!files?.length) {
-    container.innerHTML = '<p class="empty-state">No files found.</p>';
+    container.innerHTML = `<p class="empty-state">${escapeHtml(emptyMessage)}</p>`;
     return;
   }
   const hideThumbnails = options.hideThumbnails ?? getSettings().hideThumbnails;
+  const removable = !!options.removableCollectionId;
   container.classList.toggle('file-grid--compact', hideThumbnails);
   container.innerHTML = files
-    .map((f) => renderFileCard(f, {
-      likeCount: f.like_count,
-      trendScore: f.trend_score,
-      hideThumbnails,
-      ...options,
-    }))
+    .map((f) => {
+      const card = renderFileCard(f, {
+        likeCount: f.like_count,
+        trendScore: f.trend_score,
+        hideThumbnails,
+        ...options,
+      });
+      if (!removable) return card;
+      return `
+        <div class="file-card-wrap">
+          ${card}
+          <button type="button" class="file-card-remove btn btn-ghost btn-sm" data-file-id="${f.id}">
+            Remove
+          </button>
+        </div>
+      `;
+    })
     .join('');
 
   container.querySelectorAll('.tag-link').forEach((el) => {
@@ -266,7 +380,23 @@ export async function renderFileGrid(files, container, options = {}) {
     });
   });
 
-  await hydrateCardThumbnails(container);
+  if (removable && options.onRemoveFromCollection) {
+    container.querySelectorAll('.file-card-remove').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        btn.disabled = true;
+        try {
+          await options.onRemoveFromCollection(btn.dataset.fileId);
+        } catch (err) {
+          showToast(err.message || 'Could not remove file', 'error');
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  await hydrateCardThumbnails(container, files);
 }
 
 export function setLoading(container, message = 'Loading...') {

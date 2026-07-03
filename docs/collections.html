@@ -13,33 +13,33 @@
   <main>
     <div class="page-header">
       <h1>Collections</h1>
-      <p>Curated lists of community files.</p>
+      <p>Curated lists of community files — playlists, packs, and themed sets.</p>
     </div>
     <div id="collections-list"></div>
   </main>
   <script type="module">
-    import { initPage, escapeHtml, formatDate, setLoading, showError, pageUrl } from './js/ui.js';
-    import { getPublicCollections } from './js/api.js';
+    import { initPage, setLoading, showError, renderCollectionsList, pageUrl } from './js/ui.js';
+    import { getPublicCollections, enrichCollections } from './js/api.js';
+    import { getProfile } from './js/auth.js';
 
     const list = document.getElementById('collections-list');
 
     initPage(async () => {
       setLoading(list);
       try {
-        const collections = await getPublicCollections();
+        const collections = await enrichCollections(await getPublicCollections());
         if (!collections.length) {
-          list.innerHTML = '<p class="empty-state">No public collections yet.</p>';
+          const profile = getProfile();
+          const cta = profile
+            ? `<a href="${pageUrl('profile', { u: profile.username })}" class="btn btn-primary" style="margin-top:1rem">Create a collection on your profile</a>`
+            : `<a href="${pageUrl('signup')}" class="btn btn-primary" style="margin-top:1rem">Sign up to create collections</a>`;
+          list.innerHTML = `
+            <p class="empty-state">No public collections yet.</p>
+            ${cta}
+          `;
           return;
         }
-        list.innerHTML = collections.map((c) => `
-          <div class="collection-card">
-            <h3><a href="${pageUrl('collection', { id: c.id })}">${escapeHtml(c.name)}</a></h3>
-            <p>${escapeHtml(c.description || 'No description')}</p>
-            <p style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">
-              by @${escapeHtml(c.profiles?.username || 'unknown')} · ${formatDate(c.created_at)}
-            </p>
-          </div>
-        `).join('');
+        list.innerHTML = renderCollectionsList(collections, { grid: true, showOwner: true });
       } catch (err) {
         showError(list, err.message);
       }

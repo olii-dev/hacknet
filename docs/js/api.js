@@ -184,21 +184,23 @@ export async function getCollection(id) {
   return data;
 }
 
-export async function getCollectionFiles(collectionId) {
+export async function getCollectionFiles(collectionId, { includeUnapproved = false } = {}) {
   const { data, error } = await supabase
     .from('collection_files')
-    .select('file_id')
-    .eq('collection_id', collectionId);
+    .select('file_id, added_at')
+    .eq('collection_id', collectionId)
+    .order('added_at', { ascending: false });
   if (error) throw error;
   if (!data?.length) return [];
+
   const fileIds = data.map((row) => row.file_id);
-  const { data: files, error: fileError } = await supabase
-    .from('files')
-    .select(FILE_SELECT)
-    .in('id', fileIds)
-    .eq('status', 'approved');
+  let fileQuery = supabase.from('files').select(FILE_SELECT).in('id', fileIds);
+  if (!includeUnapproved) fileQuery = fileQuery.eq('status', 'approved');
+  const { data: files, error: fileError } = await fileQuery;
   if (fileError) throw fileError;
-  return files;
+
+  const order = new Map(fileIds.map((id, index) => [id, index]));
+  return (files || []).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 }
 
 export async function getUserCollections(userId) {
@@ -221,11 +223,51 @@ export async function createCollection(userId, { name, description, is_public })
   return data;
 }
 
+export async function updateCollection(collectionId, updates) {
+  const payload = {};
+  if ('name' in updates) payload.name = updates.name;
+  if ('description' in updates) payload.description = updates.description;
+  if ('is_public' in updates) payload.is_public = updates.is_public;
+  const { data, error } = await supabase
+    .from('collections')
+    .update(payload)
+    .eq('id', collectionId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function addToCollection(collectionId, fileId) {
   const { error } = await supabase
     .from('collection_files')
     .insert({ collection_id: collectionId, file_id: fileId });
   if (error) throw error;
+}
+
+export async function removeFromCollection(collectionId, fileId) {
+  const { error } = await supabase
+    .from('collection_files')
+    .delete()
+    .eq('collection_id', collectionId)
+    .eq('file_id', fileId);
+  if (error) throw error;
+}
+
+export async function enrichCollections(collections) {
+  if (!collections?.length) return [];
+  const ids = collections.map((c) => c.id);
+  const { data: links, error } = await supabase
+    .from('collection_files')
+    .select('collection_id')
+    .in('collection_id', ids);
+  if (error) throw error;
+
+  const counts = {};
+  for (const row of links || []) {
+    counts[row.collection_id] = (counts[row.collection_id] || 0) + 1;
+  }
+  return collections.map((c) => ({ ...c, file_count: counts[c.id] || 0 }));
 }
 
 export async function getPendingFiles() {

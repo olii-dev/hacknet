@@ -1,6 +1,8 @@
 const DB_NAME = 'hacknet-thumbnails';
 const STORE = 'blobs';
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_BLOB_BYTES = 5 * 1024 * 1024;
+const VIDEO_POSTER_TIMEOUT_MS = 15000;
 
 let dbPromise = null;
 
@@ -40,6 +42,7 @@ export async function getCachedThumbnail(fileId, source = 'preview') {
 }
 
 export async function putCachedThumbnail(fileId, source, blob) {
+  if (!blob || blob.size > MAX_BLOB_BYTES) return;
   try {
     const db = await openDb();
     const key = cacheKey(fileId, source);
@@ -64,6 +67,53 @@ export async function resolveThumbnailUrl(fileId, fetchUrl, source = 'preview') 
   const blob = await res.blob();
   await putCachedThumbnail(fileId, source, blob);
   return URL.createObjectURL(blob);
+}
+
+function captureVideoPoster(videoUrl) {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+
+    const finish = (blob) => {
+      clearTimeout(timer);
+      video.removeAttribute('src');
+      video.load();
+      resolve(blob);
+    };
+
+    const timer = setTimeout(() => finish(null), VIDEO_POSTER_TIMEOUT_MS);
+
+    video.onloadeddata = () => {
+      try {
+        const w = video.videoWidth || 320;
+        const h = video.videoHeight || 180;
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d')?.drawImage(video, 0, 0, w, h);
+        canvas.toBlob((blob) => finish(blob), 'image/jpeg', 0.82);
+      } catch {
+        finish(null);
+      }
+    };
+    video.onerror = () => finish(null);
+    video.src = videoUrl;
+  });
+}
+
+/** Cached JPEG poster for video cards (avoids re-fetching from Mega on every visit). */
+export async function resolveVideoPosterUrl(fileId, videoUrl) {
+  const cached = await getCachedThumbnail(fileId, 'video-poster');
+  if (cached) return cached;
+
+  const poster = await captureVideoPoster(videoUrl);
+  if (!poster) return null;
+
+  await putCachedThumbnail(fileId, 'video-poster', poster);
+  return URL.createObjectURL(poster);
 }
 
 export async function clearThumbnailCache() {

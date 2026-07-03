@@ -14,8 +14,8 @@
     <p class="loading">Loading...</p>
   </main>
   <script type="module">
-    import { initPage, renderFileGrid, escapeHtml, formatDate, showToast, pageUrl, creatorUsernameLabel } from './js/ui.js';
-    import { getProfile, getUserFiles, getUserCollections, createCollection, deleteCollection } from './js/api.js';
+    import { initPage, renderFileGrid, escapeHtml, formatDate, showToast, pageUrl, creatorUsernameLabel, renderCollectionsList, bindCollectionDeleteButtons } from './js/ui.js';
+    import { getProfile, getUserFiles, getUserCollections, createCollection, deleteCollection, enrichCollections } from './js/api.js';
     import { getUser, getProfile as getMyProfile, updateProfile } from './js/auth.js';
 
     const main = document.getElementById('main-content');
@@ -39,7 +39,9 @@
           const isOwn = me?.id === profile.id;
 
           const files = await getUserFiles(profile.id, isOwn);
-          const collections = isOwn ? await getUserCollections(profile.id) : [];
+          const collections = isOwn
+            ? await enrichCollections(await getUserCollections(profile.id))
+            : [];
 
           main.innerHTML = `
             <div class="page-header">
@@ -63,9 +65,24 @@
                 <div id="collections-list"></div>
                 <form id="new-collection-form" style="margin-top:1rem">
                   <div class="form-group">
-                    <input type="text" id="col-name" placeholder="New collection name" required>
+                    <label for="col-name">Name</label>
+                    <input type="text" id="col-name" placeholder="e.g. Best wallpapers" required maxlength="100">
                   </div>
-                  <button type="submit" class="btn btn-ghost">Create Collection</button>
+                  <div class="form-group">
+                    <label for="col-desc">Description (optional)</label>
+                    <input type="text" id="col-desc" placeholder="What's in this collection?" maxlength="500">
+                  </div>
+                  <label class="settings-row settings-row--toggle" style="margin-bottom:1rem">
+                    <div class="settings-label">
+                      <strong>Public</strong>
+                      <span>Show on the Collections page</span>
+                    </div>
+                    <span class="toggle">
+                      <input type="checkbox" id="col-public" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                  <button type="submit" class="btn btn-primary btn-sm">Create collection</button>
                 </form>
               </div>
             ` : ''}
@@ -77,34 +94,22 @@
 
           if (isOwn) {
             const colList = document.getElementById('collections-list');
-            if (collections.length) {
-              colList.innerHTML = collections.map((c) => `
-                <div class="collection-card">
-                  <div class="collection-card-row">
-                    <div>
-                      <h3><a href="${pageUrl('collection', { id: c.id })}">${escapeHtml(c.name)}</a></h3>
-                      <p>${escapeHtml(c.description || '')} · ${c.is_public ? 'Public' : 'Private'}</p>
-                    </div>
-                    <button type="button" class="btn btn-danger btn-sm delete-collection-btn" data-id="${c.id}">Delete</button>
-                  </div>
-                </div>
-              `).join('');
+            colList.innerHTML = renderCollectionsList(collections, {
+              showOwner: false,
+              showVisibility: true,
+              showDelete: true,
+              emptyMessage: 'No collections yet — create one below.',
+            });
 
-              colList.querySelectorAll('.delete-collection-btn').forEach((btn) => {
-                btn.addEventListener('click', async () => {
-                  if (!confirm('Delete this collection? Files in it will not be deleted.')) return;
-                  try {
-                    await deleteCollection(btn.dataset.id);
-                    showToast('Collection deleted', 'success');
-                    btn.closest('.collection-card')?.remove();
-                  } catch (err) {
-                    showToast(err.message || 'Could not delete collection', 'error');
-                  }
+            bindCollectionDeleteButtons(colList, async (id) => {
+              await deleteCollection(id);
+              showToast('Collection deleted', 'success');
+              if (!colList.querySelector('.collection-card')) {
+                colList.innerHTML = renderCollectionsList([], {
+                  emptyMessage: 'No collections yet — create one below.',
                 });
-              });
-            } else {
-              colList.innerHTML = '<p class="empty-state">No collections yet.</p>';
-            }
+              }
+            });
 
             document.getElementById('profile-form').addEventListener('submit', async (e) => {
               e.preventDefault();
@@ -115,7 +120,9 @@
             document.getElementById('new-collection-form').addEventListener('submit', async (e) => {
               e.preventDefault();
               const name = document.getElementById('col-name').value.trim();
-              const col = await createCollection(profile.id, { name, description: '', is_public: true });
+              const description = document.getElementById('col-desc').value.trim();
+              const is_public = document.getElementById('col-public').checked;
+              const col = await createCollection(profile.id, { name, description, is_public });
               showToast('Collection created', 'success');
               window.location.href = pageUrl('collection', { id: col.id });
             });
